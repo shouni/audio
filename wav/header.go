@@ -24,8 +24,8 @@ const (
 
 // WAV ファイルのヘッダー計算やロジックで使用される複合サイズ定数です。
 const (
-	// WavTotalHeaderSize は一般的な WAV ファイルの最小ヘッダーサイズ（44バイト）です。
-	WavTotalHeaderSize = 44
+	// TotalHeaderSize は一般的な WAV ファイルの最小ヘッダーサイズ（44バイト）です。
+	TotalHeaderSize = 44
 	// dataChunkHeaderSize は "data" チャンクヘッダーの合計サイズ（8バイト）です。
 	dataChunkHeaderSize = dataChunkIDSize + dataChunkSizeSize
 	// wavRiffHeaderSize は RIFF ヘッダーの合計サイズ（12バイト）です。
