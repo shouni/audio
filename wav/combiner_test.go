@@ -23,7 +23,7 @@ func TestCombineWavDataConcatenatesAudioPayloads(t *testing.T) {
 	if !strings.Contains(string(combined[:16]), "WAVE") {
 		t.Fatal("combined wav does not contain WAVE header")
 	}
-	if len(combined) < WavTotalHeaderSize {
+	if len(combined) < TotalHeaderSize {
 		t.Fatalf("combined wav is too short: %d bytes", len(combined))
 	}
 	gotAudio := combined[len(combined)-5:]
