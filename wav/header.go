@@ -1,6 +1,7 @@
 package wav
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -47,7 +48,7 @@ func extractAudioData(wavBytes []byte, index int) (formatHeader []byte, audioDat
 			Details: fmt.Sprintf("WAVファイルサイズが短すぎます (RIFFヘッダー不足: %dバイト)", len(wavBytes)),
 		}
 	}
-	if string(wavBytes[0:riffChunkIDSize]) != "RIFF" || string(wavBytes[riffChunkIDSize+riffChunkSizeSize:wavRiffHeaderSize]) != "WAVE" {
+	if !bytes.Equal(wavBytes[0:riffChunkIDSize], []byte("RIFF")) || !bytes.Equal(wavBytes[riffChunkIDSize+riffChunkSizeSize:wavRiffHeaderSize], []byte("WAVE")) {
 		return nil, nil, &ErrInvalidWAVHeader{
 			Index:   index,
 			Details: "RIFF/WAVE識別子が不正です",
