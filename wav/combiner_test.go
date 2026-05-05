@@ -1,6 +1,7 @@
 package wav
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"strings"
@@ -22,6 +23,9 @@ func TestCombineWavDataConcatenatesAudioPayloads(t *testing.T) {
 	if !strings.Contains(string(combined[:16]), "WAVE") {
 		t.Fatal("combined wav does not contain WAVE header")
 	}
+	if len(combined) < WavTotalHeaderSize {
+		t.Fatalf("combined wav is too short: %d bytes", len(combined))
+	}
 	gotAudio := combined[len(combined)-5:]
 	wantAudio := []byte{1, 2, 3, 4, 5}
 	dataSize := binary.LittleEndian.Uint32(combined[len(combined)-5-4 : len(combined)-5])
@@ -29,7 +33,7 @@ func TestCombineWavDataConcatenatesAudioPayloads(t *testing.T) {
 	if dataSize != expectedSize {
 		t.Fatalf("data size = %d, want %d", dataSize, expectedSize)
 	}
-	if string(gotAudio) != string(wantAudio) {
+	if !bytes.Equal(gotAudio, wantAudio) {
 		t.Fatalf("audio payload = %v, want %v", gotAudio, wantAudio)
 	}
 }
