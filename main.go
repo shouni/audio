@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strings"
 	"time"
 
 	"google.golang.org/genai"
@@ -26,61 +25,33 @@ func run() error {
 	defer cancel()
 
 	apiKey := os.Getenv("GEMINI_API_KEY")
-	if apiKey == "" {
-		return fmt.Errorf("GEMINI_API_KEY is not set")
-	}
-
-	cc := &genai.ClientConfig{
-		APIKey: apiKey,
-	}
-	client, err := genai.NewClient(ctx, cc)
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{APIKey: apiKey})
 	if err != nil {
-		return fmt.Errorf("failed to create genai client: %w", err)
+		return err
 	}
 
+	// 設定を最小限に。AUDIOのみを要求
 	config := &genai.GenerateContentConfig{
-		ResponseModalities: []string{"AUDIO", "TEXT"},
+		ResponseModalities: []string{"AUDIO"},
 		ResponseMIMEType:   "audio/wav",
 	}
 
-	slog.Info("generating content", "model", "lyria-3-pro-preview")
-	result, err := client.Models.GenerateContent(
-		ctx,
-		"lyria-3-pro-preview",
-		genai.Text("An atmospheric ambient track."),
-		config,
-	)
+	slog.Info("generating audio...")
+	res, err := client.Models.GenerateContent(ctx, "lyria-3-pro-preview", genai.Text("Hyper Techno track"), config)
 	if err != nil {
-		return fmt.Errorf("failed to generate content: %w", err)
+		return err
 	}
 
-	if len(result.Candidates) == 0 || result.Candidates[0].Content == nil || len(result.Candidates[0].Content.Parts) == 0 {
-		return fmt.Errorf("no content returned from API")
-	}
-
-	audioCount := 0
-	for _, part := range result.Candidates[0].Content.Parts {
-		if part.Text != "" {
-			fmt.Println(part.Text)
-		} else if part.InlineData != nil {
-			mimeType := part.InlineData.MIMEType
-			if mimeType != "" && !strings.HasPrefix(mimeType, "audio/") {
-				slog.Warn("skipping non-audio inline data", "mimeType", mimeType)
-				continue
-			}
-
-			audioCount++
-			filename := fmt.Sprintf("test-%d.wav", audioCount)
+	for _, part := range res.Candidates[0].Content.Parts {
+		if part.InlineData != nil {
+			filename := "output.wav"
 			if err := os.WriteFile(filename, part.InlineData.Data, 0644); err != nil {
-				return fmt.Errorf("failed to save audio file %s: %w", filename, err)
+				return err
 			}
-			slog.Info("audio saved", "filename", filename)
+			slog.Info("saved!", "file", filename)
+			return nil
 		}
 	}
 
-	if audioCount == 0 {
-		return fmt.Errorf("no audio data found in the response")
-	}
-
-	return nil
+	return fmt.Errorf("no audio data")
 }
