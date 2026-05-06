@@ -5,8 +5,7 @@ import (
 )
 
 func TestConverter_ConvertToReading(t *testing.T) {
-	// 本体コードの定義 (want: ()) に合わせて引数を削除したのだ！
-	converter, err := NewPhoneticConverter()
+	converter, err := NewConverter()
 	if err != nil {
 		t.Fatalf("failed to create converter: %v", err)
 	}
@@ -69,7 +68,11 @@ func TestConverter_ConvertToReading(t *testing.T) {
 }
 
 func BenchmarkConverter_ConvertToReading(b *testing.B) {
-	converter, _ := NewPhoneticConverter()
+	// ベンチマーク実行前の初期化時におけるエラーハンドリング
+	converter, err := NewConverter()
+	if err != nil {
+		b.Fatalf("failed to create converter: %v", err)
+	}
 	input := "長い放課後の廊下を全力で疾走する少女たちは、武道館のステージへ向かって絆を奏でる。"
 
 	b.ResetTimer()

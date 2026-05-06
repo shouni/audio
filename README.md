@@ -41,7 +41,7 @@ import (
 )
 
 func main() {
-    converter, _ := phonetic.NewPhoneticConverter()
+    converter, _ := phonetic.NewConverter()
     
     // 助詞補正を含むカタカナ変換
     reading := converter.ConvertToReading("武道館へ行こう")

@@ -7,16 +7,13 @@ import (
 	"github.com/ikawaha/kagome/v2/tokenizer"
 )
 
-type ReadingConverter interface {
-	ConvertToReading(input string) string
-}
-
 // Converter は日本語を音声合成に適した読み（カタカナ）に変換します。
 type Converter struct {
 	t *tokenizer.Tokenizer
 }
 
-func NewPhoneticConverter() (*Converter, error) {
+// NewConverter は新しい Converter を生成します。
+func NewConverter() (*Converter, error) {
 	t, err := tokenizer.New(ipa.Dict(), tokenizer.OmitBosEos())
 	if err != nil {
 		return nil, err
@@ -38,6 +35,7 @@ func (c *Converter) ConvertToReading(input string) string {
 		features := token.Features()
 		if len(features) > readingIndex && features[readingIndex] != "*" {
 			reading := features[readingIndex]
+			// 助詞の歌唱用補正
 			if len(features) > posIndex && features[posIndex] == "助詞" {
 				if token.Surface == "は" {
 					reading = "ワ"
@@ -47,6 +45,7 @@ func (c *Converter) ConvertToReading(input string) string {
 			}
 			sb.WriteString(reading)
 		} else {
+			// 未知語、英数字、記号などはそのまま保持
 			sb.WriteString(token.Surface)
 		}
 	}
