@@ -61,8 +61,7 @@ func extractAudioData(wavBytes []byte, index int) (formatHeader []byte, audioDat
 	audioData = chunkPayload(wavBytes, dataChunk)
 
 	// 抽出されたデータサイズがヘッダーの記載と一致するか最終確認
-	headerDataSize := binary.LittleEndian.Uint32(wavBytes[dataChunk.offset+dataChunkIDSize : dataChunk.offset+dataChunkHeaderSize])
-	if uint64(len(audioData)) != uint64(headerDataSize) {
+	if uint64(len(audioData)) != uint64(dataChunk.size) {
 		return nil, nil, &ErrInvalidWAVHeader{
 			Index:   index,
 			Details: "最終的な抽出データサイズがヘッダー記載サイズと一致しません",
@@ -93,25 +92,9 @@ func validateRiffHeader(wavBytes []byte, index int) error {
 func findAudioDataChunk(wavBytes []byte, index int) (wavChunk, error) {
 	var fmtChunkFound bool
 
-	for _, chunk := range scanWavChunks(wavBytes) {
-		if chunk.id == "fmt " {
-			fmtChunkFound = true
-		}
-		if chunk.id == "data" {
-			return validateDataChunk(wavBytes, chunk, index, fmtChunkFound)
-		}
-	}
-
-	return wavChunk{}, missingWavChunkError(index, fmtChunkFound, false)
-}
-
-// scanWavChunks は RIFF ヘッダー以降のチャンクメタデータを順番に読み取ります。
-func scanWavChunks(wavBytes []byte) []wavChunk {
-	var chunks []wavChunk
-
 	for offset := wavRiffHeaderSize; offset < len(wavBytes); {
 		if offset+dataChunkHeaderSize > len(wavBytes) {
-			return chunks
+			break
 		}
 
 		chunk := wavChunk{
@@ -119,16 +102,25 @@ func scanWavChunks(wavBytes []byte) []wavChunk {
 			offset: offset,
 			size:   binary.LittleEndian.Uint32(wavBytes[offset+dataChunkIDSize : offset+dataChunkHeaderSize]),
 		}
-		chunks = append(chunks, chunk)
+
+		if chunk.id == "fmt " {
+			fmtChunkFound = true
+		}
+		if chunk.id == "data" {
+			if !fmtChunkFound {
+				return wavChunk{}, missingWavChunkError(index, false, true)
+			}
+			return validateDataChunk(wavBytes, chunk, index)
+		}
 
 		nextOffset := nextChunkOffset(offset, chunk.size)
 		if nextOffset > uint64(len(wavBytes)) {
-			return chunks
+			break
 		}
 		offset = int(nextOffset)
 	}
 
-	return chunks
+	return wavChunk{}, missingWavChunkError(index, fmtChunkFound, false)
 }
 
 // nextChunkOffset は WAV チャンクのパディングを考慮して次のチャンク位置を返します。
@@ -140,8 +132,8 @@ func nextChunkOffset(offset int, chunkSize uint32) uint64 {
 	return nextOffset
 }
 
-// validateDataChunk は data チャンクのサイズと fmt チャンクの存在を検証します。
-func validateDataChunk(wavBytes []byte, chunk wavChunk, index int, fmtChunkFound bool) (wavChunk, error) {
+// validateDataChunk は data チャンクのサイズを検証します。
+func validateDataChunk(wavBytes []byte, chunk wavChunk, index int) (wavChunk, error) {
 	audioDataStart := chunk.offset + dataChunkHeaderSize
 	// int の加算オーバーフローを避けるため、残量との比較は uint64 で行う。
 	remainingBytes := uint64(len(wavBytes) - audioDataStart)
@@ -150,9 +142,6 @@ func validateDataChunk(wavBytes []byte, chunk wavChunk, index int, fmtChunkFound
 			Index:   index,
 			Details: "dataチャンクのデータ長が実際のファイルサイズを超過しています",
 		}
-	}
-	if !fmtChunkFound {
-		return wavChunk{}, missingWavChunkError(index, false, true)
 	}
 
 	return chunk, nil
