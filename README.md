@@ -15,7 +15,7 @@
 ## ✨ Core Features
 
 *   **Lossless Binary Merging**: WAV セクションをデコードなしでバイナリレベルで直接結合。再エンコードによる世代損失（音質劣化）をゼロに抑えた長尺構成を実現。
-*   **Phonetic Text Processing**: 日本語の形態素解析に基づき、音声合成エンジンが解釈しやすい読み（カタカナ）を生成。助詞（は→ワ、へ→エ）の歌唱用補正を標準装備。
+*   **Phonetic Text Processing**: 日本語の形態素解析に基づき、音声合成エンジンが解釈しやすい読み（カタカナ）を生成。助詞（は→ワ、へ→エ、を→オ）の歌唱用補正と、挨拶表現（こんにちは→コンニチワ、こんばんは→コンバンワ）の発音補正を標準装備。
 *   **Dynamic Chunk Analysis**: RIFF/WAVE 構造を動的に解析し、`fmt` や `data` チャンクを正確に特定。メタデータが含まれる複雑なファイルにも対応。
 *   **Memory Efficient**: 最終的なバッファサイズを事前に計算し、最小限のアロケーションで高速に処理。
 *   **Production Ready**: 4GB 超過チェックや、不正なヘッダーに対する厳密なバリデーションを標準装備。
@@ -43,9 +43,9 @@ import (
 func main() {
     converter, _ := phonetic.NewConverter()
     
-    // 助詞補正を含むカタカナ変換
-    reading := converter.ConvertToReading("武道館へ行こう")
-    fmt.Println(reading) // Output: ブドウカンエイコウ
+    // 助詞補正と発音補正を含むカタカナ変換
+    reading := converter.ConvertToReading("こんにちは、絆を奏でる")
+    fmt.Println(reading) // Output: コンニチワ、キズナオカナデル
 }
 ```
 

@@ -21,33 +21,51 @@ func NewConverter() (*Converter, error) {
 	return &Converter{t: t}, nil
 }
 
-// ConvertToReading は「は」→「ワ」などの助詞補正を行い、読みを返します。
+// ConvertToReading は助詞補正を行い、読みを返します。
 func (c *Converter) ConvertToReading(input string) string {
-	const (
-		posIndex     = 0
-		readingIndex = 7
-	)
 	tokens := c.t.Tokenize(input)
 	var sb strings.Builder
 	sb.Grow(len(input) * 2)
 
 	for _, token := range tokens {
-		features := token.Features()
-		if len(features) > readingIndex && features[readingIndex] != "*" {
-			reading := features[readingIndex]
-			// 助詞の歌唱用補正
-			if len(features) > posIndex && features[posIndex] == "助詞" {
-				if token.Surface == "は" {
-					reading = "ワ"
-				} else if token.Surface == "へ" {
-					reading = "エ"
-				}
-			}
-			sb.WriteString(reading)
-		} else {
-			// 未知語、英数字、記号などはそのまま保持
-			sb.WriteString(token.Surface)
+		sb.WriteString(tokenReading(token))
+	}
+
+	return correctPronunciation(sb.String())
+}
+
+// tokenReading は1トークンの辞書読みを返し、助詞の発音を補正します。
+func tokenReading(token tokenizer.Token) string {
+	const (
+		posIndex     = 0
+		readingIndex = 7
+	)
+
+	features := token.Features()
+
+	reading := token.Surface
+	if len(features) > readingIndex && features[readingIndex] != "*" {
+		reading = features[readingIndex]
+	}
+
+	// 助詞の歌唱用補正
+	if len(features) > posIndex && features[posIndex] == "助詞" {
+		switch token.Surface {
+		case "は":
+			reading = "ワ"
+		case "へ":
+			reading = "エ"
+		case "を":
+			reading = "オ"
 		}
 	}
-	return sb.String()
+
+	return reading
+}
+
+// correctPronunciation はトークン結合後の読みを発音向けに補正します。
+func correctPronunciation(reading string) string {
+	reading = strings.ReplaceAll(reading, "コンニチハ", "コンニチワ")
+	reading = strings.ReplaceAll(reading, "コンバンハ", "コンバンワ")
+	return reading
 }

@@ -36,6 +36,16 @@ func TestConverter_ConvertToReading(t *testing.T) {
 			want:  "ブドウカンエイコウ",
 		},
 		{
+			name:  "助詞「を」の歌唱補正",
+			input: "絆を奏でる",
+			want:  "キズナオカナデル",
+		},
+		{
+			name:  "挨拶の発音例外",
+			input: "こんにちは、こんばんは",
+			want:  "コンニチワ、コンバンワ",
+		},
+		{
 			name:  "英語タグの保持",
 			input: "[Verse] 昨日の空は",
 			want:  "[Verse] キノウノソラワ",
