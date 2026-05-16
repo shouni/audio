@@ -39,94 +39,29 @@ const (
 	riffChunkSizeOffset = riffChunkIDSize
 )
 
+type wavChunk struct {
+	id     string
+	offset int
+	size   uint32
+}
+
 // extractAudioData は WAV ファイルからフォーマットヘッダー情報と音声データ部分を抽出します。
 // fmt および data チャンクを動的に探索し、data チャンクの直前までを formatHeader とします。
 func extractAudioData(wavBytes []byte, index int) (formatHeader []byte, audioData []byte, err error) {
-	if len(wavBytes) < wavRiffHeaderSize {
-		return nil, nil, &ErrInvalidWAVHeader{
-			Index:   index,
-			Details: fmt.Sprintf("WAVファイルサイズが短すぎます (RIFFヘッダー不足: %dバイト)", len(wavBytes)),
-		}
-	}
-	if !bytes.Equal(wavBytes[0:riffChunkIDSize], []byte("RIFF")) || !bytes.Equal(wavBytes[riffChunkIDSize+riffChunkSizeSize:wavRiffHeaderSize], []byte("WAVE")) {
-		return nil, nil, &ErrInvalidWAVHeader{
-			Index:   index,
-			Details: "RIFF/WAVE識別子が不正です",
-		}
+	if err := validateRiffHeader(wavBytes, index); err != nil {
+		return nil, nil, err
 	}
 
-	var fmtChunkFound, dataChunkFound bool
-	var dataChunkStart int
-
-	offset := wavRiffHeaderSize
-
-	for offset < len(wavBytes) {
-		if offset+dataChunkHeaderSize > len(wavBytes) {
-			break
-		}
-
-		chunkID := string(wavBytes[offset : offset+dataChunkIDSize])
-		chunkSize := binary.LittleEndian.Uint32(wavBytes[offset+dataChunkIDSize : offset+dataChunkHeaderSize])
-
-		if chunkID == "fmt " {
-			fmtChunkFound = true
-		}
-
-		if chunkID == "data" {
-			dataChunkFound = true
-			dataChunkStart = offset
-
-			audioDataStart := offset + dataChunkHeaderSize
-			// int の加算オーバーフローを避けるため、残量との比較は uint64 で行う。
-			remainingBytes := uint64(len(wavBytes) - audioDataStart)
-			if uint64(chunkSize) > remainingBytes {
-				return nil, nil, &ErrInvalidWAVHeader{
-					Index:   index,
-					Details: "dataチャンクのデータ長が実際のファイルサイズを超過しています",
-				}
-			}
-
-			audioDataEnd := audioDataStart + int(chunkSize)
-			audioData = wavBytes[audioDataStart:audioDataEnd]
-			break
-		}
-
-		// 次のチャンクへ移動
-		// chunkSize が巨大な場合のオーバーフローを考慮し、ここでもチェックが必要です
-		nextOffset := uint64(offset) + uint64(dataChunkHeaderSize) + uint64(chunkSize)
-		if chunkSize%2 != 0 {
-			nextOffset++
-		}
-
-		if nextOffset > uint64(len(wavBytes)) {
-			// dataチャンクが見つかる前に末尾を超えてしまう場合
-			break
-		}
-		offset = int(nextOffset)
+	dataChunk, err := findAudioDataChunk(wavBytes, index)
+	if err != nil {
+		return nil, nil, err
 	}
 
-	if !fmtChunkFound || !dataChunkFound {
-		missingChunk := ""
-		if !fmtChunkFound {
-			missingChunk += "'fmt '"
-		}
-		if !dataChunkFound {
-			if missingChunk != "" {
-				missingChunk += " and "
-			}
-			missingChunk += "'data'"
-		}
-		return nil, nil, &ErrInvalidWAVHeader{
-			Index:   index,
-			Details: fmt.Sprintf("WAVファイル内に必要なチャンク (%s) が見つかりませんでした", missingChunk),
-		}
-	}
-
-	formatHeader = wavBytes[0:dataChunkStart]
+	formatHeader = wavBytes[0:dataChunk.offset]
+	audioData = chunkPayload(wavBytes, dataChunk)
 
 	// 抽出されたデータサイズがヘッダーの記載と一致するか最終確認
-	headerDataSize := binary.LittleEndian.Uint32(wavBytes[dataChunkStart+dataChunkIDSize : dataChunkStart+dataChunkHeaderSize])
-	if uint64(len(audioData)) != uint64(headerDataSize) {
+	if uint64(len(audioData)) != uint64(dataChunk.size) {
 		return nil, nil, &ErrInvalidWAVHeader{
 			Index:   index,
 			Details: "最終的な抽出データサイズがヘッダー記載サイズと一致しません",
@@ -134,6 +69,113 @@ func extractAudioData(wavBytes []byte, index int) (formatHeader []byte, audioDat
 	}
 
 	return formatHeader, audioData, nil
+}
+
+// validateRiffHeader は WAV データの RIFF/WAVE 識別子を検証します。
+func validateRiffHeader(wavBytes []byte, index int) error {
+	if len(wavBytes) < wavRiffHeaderSize {
+		return &ErrInvalidWAVHeader{
+			Index:   index,
+			Details: fmt.Sprintf("WAVファイルサイズが短すぎます (RIFFヘッダー不足: %dバイト)", len(wavBytes)),
+		}
+	}
+	if !bytes.Equal(wavBytes[0:riffChunkIDSize], []byte("RIFF")) || !bytes.Equal(wavBytes[riffChunkIDSize+riffChunkSizeSize:wavRiffHeaderSize], []byte("WAVE")) {
+		return &ErrInvalidWAVHeader{
+			Index:   index,
+			Details: "RIFF/WAVE識別子が不正です",
+		}
+	}
+	return nil
+}
+
+// findAudioDataChunk は WAV チャンク列から data チャンクを探します。
+func findAudioDataChunk(wavBytes []byte, index int) (wavChunk, error) {
+	var fmtChunkFound bool
+
+	for offset := wavRiffHeaderSize; offset < len(wavBytes); {
+		if offset+dataChunkHeaderSize > len(wavBytes) {
+			break
+		}
+
+		chunk := wavChunk{
+			id:     string(wavBytes[offset : offset+dataChunkIDSize]),
+			offset: offset,
+			size:   binary.LittleEndian.Uint32(wavBytes[offset+dataChunkIDSize : offset+dataChunkHeaderSize]),
+		}
+
+		if chunk.id == "fmt " {
+			fmtChunkFound = true
+		}
+		if chunk.id == "data" {
+			if !fmtChunkFound {
+				return wavChunk{}, missingWavChunkError(index, false, true)
+			}
+			return validateDataChunk(wavBytes, chunk, index)
+		}
+
+		nextOffset := nextChunkOffset(offset, chunk.size)
+		if nextOffset > uint64(len(wavBytes)) {
+			break
+		}
+		offset = int(nextOffset)
+	}
+
+	return wavChunk{}, missingWavChunkError(index, fmtChunkFound, false)
+}
+
+// nextChunkOffset は WAV チャンクのパディングを考慮して次のチャンク位置を返します。
+func nextChunkOffset(offset int, chunkSize uint32) uint64 {
+	nextOffset := uint64(offset) + uint64(dataChunkHeaderSize) + uint64(chunkSize)
+	if chunkSize%2 != 0 {
+		nextOffset++
+	}
+	return nextOffset
+}
+
+// validateDataChunk は data チャンクのサイズを検証します。
+func validateDataChunk(wavBytes []byte, chunk wavChunk, index int) (wavChunk, error) {
+	audioDataStart := chunk.offset + dataChunkHeaderSize
+	// int の加算オーバーフローを避けるため、残量との比較は uint64 で行う。
+	remainingBytes := uint64(len(wavBytes) - audioDataStart)
+	if uint64(chunk.size) > remainingBytes {
+		return wavChunk{}, &ErrInvalidWAVHeader{
+			Index:   index,
+			Details: "dataチャンクのデータ長が実際のファイルサイズを超過しています",
+		}
+	}
+
+	return chunk, nil
+}
+
+// missingWavChunkError は不足している必須チャンクを示すエラーを作成します。
+func missingWavChunkError(index int, fmtChunkFound, dataChunkFound bool) error {
+	missingChunk := ""
+	if !fmtChunkFound {
+		missingChunk = "'fmt '"
+	}
+	if !dataChunkFound {
+		missingChunk = appendMissingChunk(missingChunk, "'data'")
+	}
+
+	return &ErrInvalidWAVHeader{
+		Index:   index,
+		Details: fmt.Sprintf("WAVファイル内に必要なチャンク (%s) が見つかりませんでした", missingChunk),
+	}
+}
+
+// appendMissingChunk は不足チャンク名をエラーメッセージ用に連結します。
+func appendMissingChunk(current, next string) string {
+	if current == "" {
+		return next
+	}
+	return current + " and " + next
+}
+
+// chunkPayload は WAV チャンクに対応するデータ部分を返します。
+func chunkPayload(wavBytes []byte, chunk wavChunk) []byte {
+	audioDataStart := chunk.offset + dataChunkHeaderSize
+	audioDataEnd := audioDataStart + int(chunk.size)
+	return wavBytes[audioDataStart:audioDataEnd]
 }
 
 // buildCombinedWav はオーディオパーツのスライスを一括でコピーして WAV ファイルを再構築します。
