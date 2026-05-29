@@ -42,11 +42,24 @@ import (
 
 func main() {
     converter, _ := phonetic.NewConverter()
-    
+
     // 助詞補正と発音補正を含むカタカナ変換
     reading := converter.ConvertToReading("こんにちは、絆を奏でる")
     fmt.Println(reading) // Output: コンニチワ、キズナオカナデル
 }
+```
+
+辞書読みと異なる読みを使いたい語句は、表層形ごとに上書きできます。
+
+```go
+converter, _ := phonetic.NewConverter(
+    phonetic.WithReadingOverrides(map[string]string{
+        "閃光": "センコウ",
+    }),
+)
+
+reading := converter.ConvertToReading("私は閃光")
+fmt.Println(reading) // Output: ワタシワセンコウ
 ```
 
 ### 2. WAV ファイルの結合 (Combine WAV Data)

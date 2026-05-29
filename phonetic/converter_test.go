@@ -63,7 +63,12 @@ func TestConverter_ConvertToReading(t *testing.T) {
 		{
 			name:  "未知語（当て字）の挙動",
 			input: "夜露死苦",
-			want:  "ヨツユシク",
+			want:  "ヨロシク",
+		},
+		{
+			name:  "挨拶補正の副作用回避",
+			input: "コンニチハム",
+			want:  "コンニチハム",
 		},
 	}
 
@@ -74,6 +79,21 @@ func TestConverter_ConvertToReading(t *testing.T) {
 				t.Errorf("%s: ConvertToReading() = %q, want %q", tt.name, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestConverter_ConvertToReading_WithReadingOverrides(t *testing.T) {
+	converter, err := NewConverter(WithReadingOverrides(map[string]string{
+		"閃光": "ヒカリ",
+	}))
+	if err != nil {
+		t.Fatalf("failed to create converter: %v", err)
+	}
+
+	got := converter.ConvertToReading("私は閃光")
+	want := "ワタシワヒカリ"
+	if got != want {
+		t.Errorf("ConvertToReading() = %q, want %q", got, want)
 	}
 }
 
