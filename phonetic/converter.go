@@ -106,7 +106,7 @@ func (c *Converter) convertTokenized(input string) string {
 	sb.Grow(len(input) * 2)
 
 	for _, token := range tokens {
-		sb.WriteString(tokenReading(token, c.readingOverrides))
+		sb.WriteString(tokenReading(token))
 	}
 
 	return sb.String()
@@ -124,7 +124,7 @@ func (c *Converter) matchOverride(input string) (string, string, bool) {
 
 // rebuildOverrideKeys は読み上書きのキーを最長一致用の順序に並べ直します。
 func (c *Converter) rebuildOverrideKeys() {
-	c.overrideKeys = c.overrideKeys[:0]
+	c.overrideKeys = make([]string, 0, len(c.readingOverrides))
 	for surface := range c.readingOverrides {
 		c.overrideKeys = append(c.overrideKeys, surface)
 	}
@@ -143,15 +143,11 @@ func cloneReadingOverrides(overrides map[string]string) map[string]string {
 }
 
 // tokenReading は1トークンの辞書読みを返し、助詞の発音を補正します。
-func tokenReading(token tokenizer.Token, overrides map[string]string) string {
+func tokenReading(token tokenizer.Token) string {
 	const (
 		posIndex     = 0
 		readingIndex = 7
 	)
-
-	if reading, ok := overrides[token.Surface]; ok {
-		return reading
-	}
 
 	features := token.Features()
 
