@@ -162,7 +162,7 @@ func loadReadingOverridesJSON(data []byte) (map[string]string, error) {
 
 	for surface, reading := range overrides {
 		if surface == "" || reading == "" {
-			delete(overrides, surface)
+			return nil, fmt.Errorf("invalid reading override: surface and reading must not be empty (surface: %q, reading: %q)", surface, reading)
 		}
 	}
 
