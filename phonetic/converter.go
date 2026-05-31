@@ -27,6 +27,9 @@ var defaultReadingOverrides = map[string]string{
 	"こんにちは": "コンニチワ",
 	"こんばんは": "コンバンワ",
 	"夜露死苦":  "ヨロシク",
+	"刃":     "ヤイバ",
+	"閃光":    "ヒカリ",
+	"荒野":    "コウヤ",
 }
 
 // WithReadingOverrides は表層形に対する読みの上書きを追加する Option を返します。

@@ -28,7 +28,12 @@ func TestConverter_ConvertToReading(t *testing.T) {
 		{
 			name:  "助詞「は」の歌唱補正",
 			input: "私は閃光",
-			want:  "ワタシワセンコウ",
+			want:  "ワタシワヒカリ",
+		},
+		{
+			name:  "歌唱用の漢字読み補正",
+			input: "荒野に刃と閃光",
+			want:  "コウヤニヤイバトヒカリ",
 		},
 		{
 			name:  "助詞「へ」の歌唱補正",
@@ -84,14 +89,14 @@ func TestConverter_ConvertToReading(t *testing.T) {
 
 func TestConverter_ConvertToReading_WithReadingOverrides(t *testing.T) {
 	converter, err := NewConverter(WithReadingOverrides(map[string]string{
-		"閃光": "ヒカリ",
+		"閃光": "センコウ",
 	}))
 	if err != nil {
 		t.Fatalf("failed to create converter: %v", err)
 	}
 
 	got := converter.ConvertToReading("私は閃光")
-	want := "ワタシワヒカリ"
+	want := "ワタシワセンコウ"
 	if got != want {
 		t.Errorf("ConvertToReading() = %q, want %q", got, want)
 	}
