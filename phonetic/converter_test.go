@@ -102,6 +102,40 @@ func TestConverter_ConvertToReading_WithReadingOverrides(t *testing.T) {
 	}
 }
 
+func TestDefaultReadingOverrides_Validation(t *testing.T) {
+	overrides, err := loadReadingOverridesJSON(defaultReadingOverridesJSON)
+	if err != nil {
+		t.Fatalf("failed to load embedded reading overrides JSON: %v", err)
+	}
+	if len(overrides) == 0 {
+		t.Fatal("embedded reading overrides should not be empty")
+	}
+}
+
+func TestLoadReadingOverridesJSON_RejectsEmptyValues(t *testing.T) {
+	tests := []struct {
+		name string
+		data []byte
+	}{
+		{
+			name: "empty surface",
+			data: []byte(`{"": "コウヤ"}`),
+		},
+		{
+			name: "empty reading",
+			data: []byte(`{"守護神": ""}`),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := loadReadingOverridesJSON(tt.data); err == nil {
+				t.Fatal("loadReadingOverridesJSON() error = nil, want error")
+			}
+		})
+	}
+}
+
 func BenchmarkConverter_ConvertToReading(b *testing.B) {
 	// ベンチマーク実行前の初期化時におけるエラーハンドリング
 	converter, err := NewConverter()
