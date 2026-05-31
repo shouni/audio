@@ -1,6 +1,9 @@
 package phonetic
 
 import (
+	_ "embed"
+	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -8,6 +11,9 @@ import (
 	"github.com/ikawaha/kagome-dict/ipa"
 	"github.com/ikawaha/kagome/v2/tokenizer"
 )
+
+//go:embed reading_overrides.json
+var defaultReadingOverridesJSON []byte
 
 // Converter は日本語テキストを音声合成に適した読み（カタカナ）へ変換します。
 //
@@ -23,14 +29,7 @@ type Converter struct {
 type Option func(*Converter)
 
 // defaultReadingOverrides は標準で適用する表層形ごとの読み上書きです。
-var defaultReadingOverrides = map[string]string{
-	"こんにちは": "コンニチワ",
-	"こんばんは": "コンバンワ",
-	"夜露死苦":  "ヨロシク",
-	"刃":     "ヤイバ",
-	"閃光":    "ヒカリ",
-	"荒野":    "コウヤ",
-}
+var defaultReadingOverrides = mustLoadReadingOverridesJSON(defaultReadingOverridesJSON)
 
 // WithReadingOverrides は表層形に対する読みの上書きを追加する Option を返します。
 //
@@ -143,6 +142,31 @@ func cloneReadingOverrides(overrides map[string]string) map[string]string {
 		cloned[surface] = reading
 	}
 	return cloned
+}
+
+// mustLoadReadingOverridesJSON は同梱JSONから読み上書きを読み込みます。
+func mustLoadReadingOverridesJSON(data []byte) map[string]string {
+	overrides, err := loadReadingOverridesJSON(data)
+	if err != nil {
+		panic(err)
+	}
+	return overrides
+}
+
+// loadReadingOverridesJSON は表層形をキー、読みを値にしたJSONを読み込みます。
+func loadReadingOverridesJSON(data []byte) (map[string]string, error) {
+	var overrides map[string]string
+	if err := json.Unmarshal(data, &overrides); err != nil {
+		return nil, fmt.Errorf("load reading overrides: %w", err)
+	}
+
+	for surface, reading := range overrides {
+		if surface == "" || reading == "" {
+			delete(overrides, surface)
+		}
+	}
+
+	return overrides, nil
 }
 
 // tokenReading は1トークンの辞書読みを返し、助詞の発音を補正します。
