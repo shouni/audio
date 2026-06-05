@@ -31,6 +31,12 @@ type Option func(*Converter)
 // defaultReadingOverrides は標準で適用する表層形ごとの読み上書きです。
 var defaultReadingOverrides = mustLoadReadingOverridesJSON(defaultReadingOverridesJSON)
 
+var particleReadings = map[string]string{
+	"は": "ワ",
+	"へ": "エ",
+	"を": "オ",
+}
+
 // WithReadingOverrides は表層形に対する読みの上書きを追加する Option を返します。
 //
 // overrides のキーは入力文字列中の表層形、値はその表層形に対応する読みです。
@@ -39,7 +45,7 @@ var defaultReadingOverrides = mustLoadReadingOverridesJSON(defaultReadingOverrid
 func WithReadingOverrides(overrides map[string]string) Option {
 	return func(c *Converter) {
 		for surface, reading := range overrides {
-			if surface == "" || reading == "" {
+			if !validReadingOverride(surface, reading) {
 				continue
 			}
 			c.readingOverrides[surface] = reading
@@ -79,12 +85,7 @@ func (c *Converter) ConvertToReading(input string) string {
 	pending.Grow(len(input))
 
 	for i := 0; i < len(input); {
-		if surface, reading, ok := c.matchOverride(input[i:]); ok {
-			if pending.Len() > 0 {
-				sb.WriteString(c.convertTokenized(pending.String()))
-				pending.Reset()
-			}
-			sb.WriteString(reading)
+		if surface, ok := c.writeOverrideReading(input[i:], &sb, &pending); ok {
 			i += len(surface)
 			continue
 		}
@@ -94,11 +95,29 @@ func (c *Converter) ConvertToReading(input string) string {
 		i += size
 	}
 
-	if pending.Len() > 0 {
-		sb.WriteString(c.convertTokenized(pending.String()))
-	}
+	c.flushPendingReading(&sb, &pending)
 
 	return sb.String()
+}
+
+// writeOverrideReading は input の先頭に一致する読み上書きを出力し、一致有無を返します。
+func (c *Converter) writeOverrideReading(input string, converted, pending *strings.Builder) (string, bool) {
+	surface, reading, ok := c.matchOverride(input)
+	if !ok {
+		return "", false
+	}
+
+	c.flushPendingReading(converted, pending)
+	converted.WriteString(reading)
+	return surface, true
+}
+
+func (c *Converter) flushPendingReading(converted, pending *strings.Builder) {
+	if pending.Len() == 0 {
+		return
+	}
+	converted.WriteString(c.convertTokenized(pending.String()))
+	pending.Reset()
 }
 
 // convertTokenized は input を形態素解析し、各トークンの読みを連結して返します。
@@ -161,7 +180,7 @@ func loadReadingOverridesJSON(data []byte) (map[string]string, error) {
 	}
 
 	for surface, reading := range overrides {
-		if surface == "" || reading == "" {
+		if !validReadingOverride(surface, reading) {
 			return nil, fmt.Errorf("invalid reading override: surface and reading must not be empty (surface: %q, reading: %q)", surface, reading)
 		}
 	}
@@ -169,31 +188,39 @@ func loadReadingOverridesJSON(data []byte) (map[string]string, error) {
 	return overrides, nil
 }
 
+func validReadingOverride(surface, reading string) bool {
+	return surface != "" && reading != ""
+}
+
 // tokenReading は1トークンの辞書読みを返し、助詞の発音を補正します。
 func tokenReading(token tokenizer.Token) string {
+	reading := dictionaryReading(token)
+	if corrected, ok := particleReading(token); ok {
+		return corrected
+	}
+	return reading
+}
+
+func dictionaryReading(token tokenizer.Token) string {
 	const (
-		posIndex     = 0
 		readingIndex = 7
 	)
 
 	features := token.Features()
+	if len(features) <= readingIndex || features[readingIndex] == "*" {
+		return token.Surface
+	}
+	return features[readingIndex]
+}
 
-	reading := token.Surface
-	if len(features) > readingIndex && features[readingIndex] != "*" {
-		reading = features[readingIndex]
+func particleReading(token tokenizer.Token) (string, bool) {
+	const posIndex = 0
+
+	features := token.Features()
+	if len(features) <= posIndex || features[posIndex] != "助詞" {
+		return "", false
 	}
 
-	// 助詞の歌唱用補正
-	if len(features) > posIndex && features[posIndex] == "助詞" {
-		switch token.Surface {
-		case "は":
-			reading = "ワ"
-		case "へ":
-			reading = "エ"
-		case "を":
-			reading = "オ"
-		}
-	}
-
-	return reading
+	reading, ok := particleReadings[token.Surface]
+	return reading, ok
 }
