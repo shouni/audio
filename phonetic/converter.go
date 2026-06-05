@@ -194,29 +194,28 @@ func validReadingOverride(surface, reading string) bool {
 
 // tokenReading は1トークンの辞書読みを返し、助詞の発音を補正します。
 func tokenReading(token tokenizer.Token) string {
-	reading := dictionaryReading(token)
-	if corrected, ok := particleReading(token); ok {
+	features := token.Features()
+	reading := dictionaryReading(token, features)
+	if corrected, ok := particleReading(token, features); ok {
 		return corrected
 	}
 	return reading
 }
 
-func dictionaryReading(token tokenizer.Token) string {
+func dictionaryReading(token tokenizer.Token, features []string) string {
 	const (
 		readingIndex = 7
 	)
 
-	features := token.Features()
 	if len(features) <= readingIndex || features[readingIndex] == "*" {
 		return token.Surface
 	}
 	return features[readingIndex]
 }
 
-func particleReading(token tokenizer.Token) (string, bool) {
+func particleReading(token tokenizer.Token, features []string) (string, bool) {
 	const posIndex = 0
 
-	features := token.Features()
 	if len(features) <= posIndex || features[posIndex] != "助詞" {
 		return "", false
 	}
