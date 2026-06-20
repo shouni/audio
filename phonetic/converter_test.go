@@ -87,6 +87,49 @@ func TestConverter_ConvertToReading(t *testing.T) {
 	}
 }
 
+func TestConverter_ConvertToReading_WithPhraseSpacing(t *testing.T) {
+	converter, err := NewConverter(WithPhraseSpacing())
+	if err != nil {
+		t.Fatalf("failed to create converter: %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "助詞「が」の後にスペース",
+			input: "空が青い",
+			want:  "ソラガ アオイ",
+		},
+		{
+			name:  "助詞「は」補正後にスペース",
+			input: "私は歌う",
+			want:  "ワタシワ ウタウ",
+		},
+		{
+			name:  "助詞「を」補正後にスペース",
+			input: "絆を奏でる",
+			want:  "キズナオ カナデル",
+		},
+		{
+			name:  "末尾の助詞後スペースはトリム",
+			input: "夜の",
+			want:  "ヨルノ",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := converter.ConvertToReading(tt.input)
+			if got != tt.want {
+				t.Errorf("%s: ConvertToReading() = %q, want %q", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestConverter_ConvertToReading_WithReadingOverrides(t *testing.T) {
 	converter, err := NewConverter(WithReadingOverrides(map[string]string{
 		"閃光": "センコウ",

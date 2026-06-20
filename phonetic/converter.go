@@ -4,7 +4,8 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -23,6 +24,7 @@ type Converter struct {
 	t                *tokenizer.Tokenizer
 	readingOverrides map[string]string
 	overrideKeys     []string
+	phraseSpacing    bool
 }
 
 // Option は Converter の生成時に変換動作を調整する関数です。
@@ -35,6 +37,13 @@ var particleReadings = map[string]string{
 	"は": "ワ",
 	"へ": "エ",
 	"を": "オ",
+}
+
+// WithPhraseSpacing は文節境界（助詞・助動詞の直後）にスペースを挿入する Option を返します。
+func WithPhraseSpacing() Option {
+	return func(c *Converter) {
+		c.phraseSpacing = true
+	}
 }
 
 // WithReadingOverrides は表層形に対する読みの上書きを追加する Option を返します。
@@ -97,7 +106,11 @@ func (c *Converter) ConvertToReading(input string) string {
 
 	c.flushPendingReading(&sb, &pending)
 
-	return sb.String()
+	result := sb.String()
+	if c.phraseSpacing {
+		result = strings.TrimRight(result, " ")
+	}
+	return result
 }
 
 // writeOverrideReading は input の先頭に一致する読み上書きを出力し、一致有無を返します。
@@ -128,6 +141,9 @@ func (c *Converter) convertTokenized(input string) string {
 
 	for _, token := range tokens {
 		sb.WriteString(tokenReading(token))
+		if c.phraseSpacing && isPhraseBreak(token) {
+			sb.WriteByte(' ')
+		}
 	}
 
 	return sb.String()
@@ -145,21 +161,16 @@ func (c *Converter) matchOverride(input string) (string, string, bool) {
 
 // rebuildOverrideKeys は読み上書きのキーを最長一致用の順序に並べ直します。
 func (c *Converter) rebuildOverrideKeys() {
-	c.overrideKeys = make([]string, 0, len(c.readingOverrides))
-	for surface := range c.readingOverrides {
-		c.overrideKeys = append(c.overrideKeys, surface)
-	}
-	sort.Slice(c.overrideKeys, func(i, j int) bool {
-		return len(c.overrideKeys[i]) > len(c.overrideKeys[j])
+	c.overrideKeys = slices.Collect(maps.Keys(c.readingOverrides))
+	slices.SortFunc(c.overrideKeys, func(a, b string) int {
+		return len(b) - len(a)
 	})
 }
 
 // cloneReadingOverrides は読み上書きのマップを複製します。
 func cloneReadingOverrides(overrides map[string]string) map[string]string {
 	cloned := make(map[string]string, len(overrides))
-	for surface, reading := range overrides {
-		cloned[surface] = reading
-	}
+	maps.Copy(cloned, overrides)
 	return cloned
 }
 
@@ -211,6 +222,15 @@ func dictionaryReading(token tokenizer.Token, features []string) string {
 		return token.Surface
 	}
 	return features[readingIndex]
+}
+
+func isPhraseBreak(token tokenizer.Token) bool {
+	features := token.Features()
+	if len(features) == 0 {
+		return false
+	}
+	pos := features[0]
+	return pos == "助詞" || pos == "助動詞"
 }
 
 func particleReading(token tokenizer.Token, features []string) (string, bool) {

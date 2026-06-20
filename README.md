@@ -62,6 +62,17 @@ reading := converter.ConvertToReading("私は閃光")
 fmt.Println(reading) // Output: ワタシワセンコウ
 ```
 
+文節境界（助詞・助動詞の直後）にスペースを挿入することで、TTS エンジンが自然なイントネーションで読み上げやすくなります。
+
+```go
+converter, _ := phonetic.NewConverter(
+    phonetic.WithPhraseSpacing(),
+)
+
+reading := converter.ConvertToReading("空が青い")
+fmt.Println(reading) // Output: ソラガ アオイ
+```
+
 ### 2. WAV ファイルの結合 (Combine WAV Data)
 
 複数の WAV バイナリを、単一のファイルとしてロスレスに結合します。
