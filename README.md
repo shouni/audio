@@ -1,10 +1,10 @@
 # 🎼 audio
 
+[![CI](https://github.com/shouni/audio/actions/workflows/ci.yml/badge.svg)](https://github.com/shouni/audio/actions/workflows/ci.yml)
 [![Language](https://img.shields.io/badge/Language-Go-blue)](https://golang.org/)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/shouni/audio)](https://golang.org/)
 [![GitHub tag (latest by date)](https://img.shields.io/github/v/tag/shouni/audio)](https://github.com/shouni/audio/tags)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Go Report Card](https://goreportcard.com/badge/github.com/shouni/audio)](https://goreportcard.com/report/github.com/shouni/audio)
 [![Go Reference](https://pkg.go.dev/badge/github.com/shouni/audio.svg)](https://pkg.go.dev/github.com/shouni/audio)
 [![Status](https://img.shields.io/badge/Status-Completed-brightgreen)](#)
 

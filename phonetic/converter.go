@@ -1,3 +1,4 @@
+// Package phonetic は、日本語テキストを形態素解析し、音声合成に適した読み（カタカナ）へ変換します。
 package phonetic
 
 import (

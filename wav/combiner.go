@@ -1,3 +1,4 @@
+// Package wav は、WAVデータをデコードなしでバイナリレベルで結合するユーティリティを提供します。
 package wav
 
 import (

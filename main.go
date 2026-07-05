@@ -1,3 +1,4 @@
+// audio は、Gemini API (Lyria) を使って音声を生成し、WAVファイルとして保存する CLI ツールです。
 package main
 
 import (
