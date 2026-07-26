@@ -1,7 +1,11 @@
 package phonetic
 
 import (
+	"strings"
 	"testing"
+
+	"github.com/ikawaha/kagome-dict/ipa"
+	"github.com/ikawaha/kagome/v2/tokenizer"
 )
 
 func TestConverter_ConvertToReading(t *testing.T) {
@@ -87,17 +91,21 @@ func TestConverter_ConvertToReading(t *testing.T) {
 			input: "一本気な一匹狼",
 			want:  "イッポンギナイッピキオオカミ",
 		},
-		// 「世界」の上書きが「世界観」の「観」を巻き込んで欠落させないこと。
+		// 「掌」の上書きが「掌握」の「握」を巻き込んで欠落させないこと。
 		// 読み上書きは形態素境界で終わる一致だけを採用する。
+		//
+		// かつては「世界」と「世界観」で確かめていたが、「世界」は辞書がそのまま
+		// セカイと読むため上書きを削除した。実在する上書きで確かめないと、
+		// 境界判定が壊れてもテストが素通りする。
 		{
 			name:  "形態素境界をまたぐ上書きは適用しない",
-			input: "世界観が変わる",
-			want:  "セカイカンガカワル",
+			input: "掌握が変わる",
+			want:  "ショウアクガカワル",
 		},
 		{
 			name:  "境界が一致すれば上書きを適用する",
-			input: "世界が変わる",
-			want:  "セカイガカワル",
+			input: "掌が熱い",
+			want:  "テノヒラガアツイ",
 		},
 	}
 
@@ -149,10 +157,12 @@ func TestConverter_ConvertToReading_WithPhraseSpacing(t *testing.T) {
 			input: "運命の閃光が瞳を灼く",
 			want:  "サダメノ ヒカリガ ヒトミオ ヤク",
 		},
+		// 上書きが隣り合う場合。「絆と翼を」で確かめていたが、どちらも辞書が正しく
+		// 読むため上書きを削除した。上書きが実在する語でないと連続を確かめられない。
 		{
 			name:  "読み上書きが連続しても文節が保たれる",
-			input: "絆と翼を",
-			want:  "キズナト ツバサオ",
+			input: "刃と閃光を",
+			want:  "ヤイバト ヒカリオ",
 		},
 	}
 
@@ -209,6 +219,13 @@ func TestDefaultReadingOverrides_KeepsPlainCompoundsUnoverridden(t *testing.T) {
 	}{
 		{input: "設計図", want: "セッケイズ"},
 		{input: "未来の設計図", want: "ミライノセッケイズ"},
+		// 「音響」をアコースティックと読ませる上書きが入っていたことがあります。
+		// アコースティックは「生楽器の」の意味で、音響とは指すものが違います。
+		// 加えて当て字は派生語に漏れます（音響効果→アコースティックコウカ）。
+		// 当て字が許されるのは、その表記でその読みが流通している語（運命→サダメ、
+		// 永遠→トワ）に限ります。
+		{input: "音響", want: "オンキョウ"},
+		{input: "音響効果", want: "オンキョウコウカ"},
 	}
 
 	for _, tt := range tests {
@@ -216,6 +233,145 @@ func TestDefaultReadingOverrides_KeepsPlainCompoundsUnoverridden(t *testing.T) {
 			if got := converter.ConvertToReading(tt.input); got != tt.want {
 				t.Errorf("ConvertToReading(%q) = %q, want %q", tt.input, got, tt.want)
 			}
+		})
+	}
+}
+
+// TestDefaultReadingOverrides_FixesMisreadings は、辞書が別語の読みを当ててしまう表記を
+// 上書きで正しく読ませることを確認します。
+//
+// 「瞬く」は辞書が「しばたく」を採用するため、歌詞に書くと シバタク と歌われます。連用形は
+// さらに崩れて シバタタイテ になります。活用形は語幹をキーにすると まとめて拾えます。
+func TestDefaultReadingOverrides_FixesMisreadings(t *testing.T) {
+	converter, err := NewConverter()
+	if err != nil {
+		t.Fatalf("failed to create converter: %v", err)
+	}
+
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{input: "瞬く信号", want: "マタタクシンゴウ"},
+		{input: "此の建物", want: "コノタテモノ"},
+		{input: "薪を焚べる", want: "タキギオクベル"},
+		{input: "天穹の観測", want: "テンキュウノカンソク"},
+		{input: "燦たる成果", want: "サンタルセイカ"},
+		{input: "爆速で処理する", want: "バクソクデショリスル"},
+		{input: "馬が奔る", want: "ウマガハシル"},
+		{input: "守りを固める", want: "マモリオカタメル"},
+		{input: "種を宿す", want: "タネオヤドス"},
+		{input: "電球が瞬いている", want: "デンキュウガマタタイテイル"},
+		{input: "水面が揺蕩う", want: "スイメンガタユタウ"},
+		{input: "彷徨いを続ける", want: "サマヨイオツヅケル"},
+		{input: "細部に拘って作る", want: "サイブニコダワッテツクル"},
+		{input: "部下を労る", want: "ブカオイタワル"},
+		{input: "町が黄昏れる", want: "マチガタソガレル"},
+		{input: "空が黄昏れて", want: "ソラガタソガレテ"},
+		{input: "黄昏の町", want: "タソガレノマチ"},
+		{input: "此方に置く", want: "コチラニオク"},
+		{input: "僕等と我等", want: "ボクラトワレラ"},
+		{input: "夜風が入る", want: "ヨカゼガハイル"},
+		{input: "一途な性格", want: "イチズナセイカク"},
+		{input: "十六夜の月", want: "イザヨイノツキ"},
+		{input: "掌を返す", want: "テノヒラオカエス"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := converter.ConvertToReading(tt.input); got != tt.want {
+				t.Errorf("ConvertToReading(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestDefaultReadingOverrides_KeepsCompoundsIntact は、訓読み用の上書きが同じ漢字を含む
+// 音読みの熟語を壊さないことを確認します。
+//
+// 「瞬く」「拘る」「掌」「燈」のような短い上書きは、形態素境界で終わる一致だけを採用する
+// 仕組みに守られています。境界判定が壊れると 一瞬 が イチマタタク のように崩れます。
+func TestDefaultReadingOverrides_KeepsCompoundsIntact(t *testing.T) {
+	converter, err := NewConverter()
+	if err != nil {
+		t.Fatalf("failed to create converter: %v", err)
+	}
+
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{input: "一瞬", want: "イッシュン"},
+		{input: "瞬間", want: "シュンカン"},
+		{input: "拘束", want: "コウソク"},
+		{input: "掌握", want: "ショウアク"},
+		{input: "燈台", want: "トウダイ"},
+		{input: "動揺", want: "ドウヨウ"},
+		{input: "黄金", want: "オウゴン"},
+		{input: "苦労", want: "クロウ"},
+		{input: "燦然と輝く", want: "サンゼントカガヤク"},
+		{input: "爆発の速度", want: "バクハツノソクド"},
+		{input: "奔流に飲まれ", want: "ホンリュウニノマレ"},
+		{input: "天空の城", want: "テンクウノシロ"},
+		{input: "お守りを買う", want: "オマモリオカウ"},
+		{input: "国境を守り抜く", want: "コッキョウオマモリヌク"},
+		{input: "種を宿した苗", want: "タネオヤドシタナエ"},
+		// 上書きの照合はトークンの開始位置からしか行わない。「非同期」は1トークンなので
+		// 内側の「同期」は照合対象にならず、上書き (同期→シンクロ) が発火しない。
+		// かつては「非同期」専用の上書きでヒドウキにしていたが、辞書がそう読むため
+		// 不要だった。この性質が崩れるとヒシンクロになるので、上書きを削除した側の
+		// 保険としてここで固定する。
+		{input: "非同期", want: "ヒドウキ"},
+		{input: "非同期処理", want: "ヒドウキショリ"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := converter.ConvertToReading(tt.input); got != tt.want {
+				t.Errorf("ConvertToReading(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestDefaultReadingOverrides_NoRedundantEntries は、辞書が既に正しく読める語に
+// 上書きを置いていないことを確認します。
+//
+// 上書きは「辞書が間違える語」の一覧であることに価値があります。辞書と同じ読みを
+// 書いたエントリは挙動を変えないまま増え続け、本当に危ない語を見分けられなくします。
+// 実際、一度は 120 件中 51 件が辞書と同一でした。
+//
+// 単語単体だけでなく複数の文脈で比較します。「何時」のように、単体では辞書も
+// イツと読むが文中ではナンジになる語があり、単体比較だけでは必要な上書きまで
+// 不要と判定してしまうためです。
+func TestDefaultReadingOverrides_NoRedundantEntries(t *testing.T) {
+	tok, err := tokenizer.New(ipa.Dict(), tokenizer.OmitBosEos())
+	if err != nil {
+		t.Fatalf("failed to create tokenizer: %v", err)
+	}
+	plain := &Converter{t: tok, readingOverrides: map[string]string{}}
+	plain.rebuildOverrideKeys()
+
+	overridden, err := NewConverter()
+	if err != nil {
+		t.Fatalf("failed to create converter: %v", err)
+	}
+
+	contexts := []string{
+		"%s", "%sが好き", "%sを抱いて", "%sの向こう", "君の%s",
+		"遠い%sへ", "%sだけが残る", "静かな%sと", "%sは終わらない",
+	}
+
+	for surface := range defaultReadingOverrides {
+		t.Run(surface, func(t *testing.T) {
+			for _, format := range contexts {
+				input := strings.ReplaceAll(format, "%s", surface)
+				if plain.ConvertToReading(input) != overridden.ConvertToReading(input) {
+					return // どれか1つでも辞書と違えば、この上書きは仕事をしている。
+				}
+			}
+			t.Errorf("上書き %q (%q) は全文脈で辞書の読みと一致します。辞書が正しく読めるので削除してください",
+				surface, defaultReadingOverrides[surface])
 		})
 	}
 }
