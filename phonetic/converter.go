@@ -8,7 +8,6 @@ import (
 	"maps"
 	"slices"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/ikawaha/kagome-dict/ipa"
 	"github.com/ikawaha/kagome/v2/tokenizer"
@@ -85,27 +84,41 @@ func NewConverter(options ...Option) (*Converter, error) {
 
 // ConvertToReading は input をカタカナの読みに変換します。
 //
-// 変換時は、まず登録済みの読み上書きを最長一致で適用し、残った部分を形態素解析して
-// 辞書読みと助詞補正を適用します。上書き読みが登録されている表層形は、形態素解析の
-// 分割結果にかかわらず指定された読みになります。
+// 変換は input 全体を一度だけ形態素解析し、その結果に読み上書きを重ねる順序で行います。
+// 上書きを先に適用して入力を分断すると、残った断片が文脈を失った状態で解析され、
+// 品詞が誤判定されます（例: 「運命の閃光が」の「が」は、単独で解析すると助詞ではなく
+// 接続詞になり、助詞前提の読み補正と文節スペースが両方とも外れる）。
+//
+// 読み上書きは形態素の境界で始まり境界で終わる一致だけを採用します。境界をまたぐ一致まで
+// 拾うと、上書きが覆い切れなかった残りの文字が欠落します（例: 「世界観」に対する「世界」）。
 func (c *Converter) ConvertToReading(input string) string {
-	var sb strings.Builder
-	var pending strings.Builder
-	sb.Grow(len(input) * 2)
-	pending.Grow(len(input))
+	tokens := c.t.Tokenize(input)
+	boundaries := tokenBoundaries(input, tokens)
 
-	for i := 0; i < len(input); {
-		if surface, ok := c.writeOverrideReading(input[i:], &sb, &pending); ok {
-			i += len(surface)
+	var sb strings.Builder
+	sb.Grow(len(input) * 2)
+
+	for i := 0; i < len(tokens); {
+		token := tokens[i]
+
+		surface, reading, ok := c.matchOverrideAt(input, token.Position, boundaries)
+		if !ok {
+			sb.WriteString(tokenReading(token))
+			c.writePhraseBreak(&sb, token)
+			i++
 			continue
 		}
 
-		r, size := utf8.DecodeRuneInString(input[i:])
-		pending.WriteRune(r)
-		i += size
+		sb.WriteString(reading)
+		// 上書きが覆ったトークンをまとめて読み飛ばし、文節スペースは末尾のトークンで判定する。
+		end := token.Position + len(surface)
+		last := i
+		for i < len(tokens) && tokens[i].Position < end {
+			last = i
+			i++
+		}
+		c.writePhraseBreak(&sb, tokens[last])
 	}
-
-	c.flushPendingReading(&sb, &pending)
 
 	result := sb.String()
 	if c.phraseSpacing {
@@ -114,48 +127,34 @@ func (c *Converter) ConvertToReading(input string) string {
 	return result
 }
 
-// writeOverrideReading は input の先頭に一致する読み上書きを出力し、一致有無を返します。
-func (c *Converter) writeOverrideReading(input string, converted, pending *strings.Builder) (string, bool) {
-	surface, reading, ok := c.matchOverride(input)
-	if !ok {
-		return "", false
+// writePhraseBreak は、文節境界のトークン直後にスペースを書き込みます。
+func (c *Converter) writePhraseBreak(sb *strings.Builder, token tokenizer.Token) {
+	if c.phraseSpacing && isPhraseBreak(token) {
+		sb.WriteByte(' ')
 	}
-
-	c.flushPendingReading(converted, pending)
-	converted.WriteString(reading)
-	return surface, true
 }
 
-func (c *Converter) flushPendingReading(converted, pending *strings.Builder) {
-	if pending.Len() == 0 {
-		return
-	}
-	converted.WriteString(c.convertTokenized(pending.String()))
-	pending.Reset()
-}
-
-// convertTokenized は input を形態素解析し、各トークンの読みを連結して返します。
-func (c *Converter) convertTokenized(input string) string {
-	tokens := c.t.Tokenize(input)
-	var sb strings.Builder
-	sb.Grow(len(input) * 2)
-
+// tokenBoundaries は、各トークンの開始バイト位置と入力末尾から成る境界集合を返します。
+func tokenBoundaries(input string, tokens []tokenizer.Token) map[int]struct{} {
+	boundaries := make(map[int]struct{}, len(tokens)+1)
 	for _, token := range tokens {
-		sb.WriteString(tokenReading(token))
-		if c.phraseSpacing && isPhraseBreak(token) {
-			sb.WriteByte(' ')
-		}
+		boundaries[token.Position] = struct{}{}
 	}
-
-	return sb.String()
+	boundaries[len(input)] = struct{}{}
+	return boundaries
 }
 
-// matchOverride は input の先頭に一致する読み上書きを最長一致で返します。
-func (c *Converter) matchOverride(input string) (string, string, bool) {
+// matchOverrideAt は、start から始まり形態素境界で終わる最長の読み上書きを返します。
+func (c *Converter) matchOverrideAt(input string, start int, boundaries map[int]struct{}) (string, string, bool) {
+	rest := input[start:]
 	for _, surface := range c.overrideKeys {
-		if strings.HasPrefix(input, surface) {
-			return surface, c.readingOverrides[surface], true
+		if !strings.HasPrefix(rest, surface) {
+			continue
 		}
+		if _, ok := boundaries[start+len(surface)]; !ok {
+			continue
+		}
+		return surface, c.readingOverrides[surface], true
 	}
 	return "", "", false
 }
