@@ -18,7 +18,7 @@
 *   **Phonetic Text Processing**: 日本語の形態素解析に基づき、音声合成エンジンが解釈しやすい読み（カタカナ）を生成。助詞の歌唱用補正と、同梱 JSON 辞書による表層形ごとの読み補正を標準装備。
 *   **Dynamic Chunk Analysis**: RIFF/WAVE 構造を動的に解析し、`fmt` や `data` チャンクを正確に特定。メタデータが含まれる複雑なファイルにも対応。
 *   **Memory Efficient**: 最終的なバッファサイズを事前に計算し、最小限のアロケーションで高速に処理。
-*   **Production Ready**: 4GB 超過チェックや、不正なヘッダーに対する厳密なバリデーションを標準装備。
+*   **Production Ready**: フォーマット不一致の検出、4GB 超過チェック、不正なヘッダーに対する厳密なバリデーションを標準装備。
 
 ## 📦 Installation
 
@@ -49,7 +49,11 @@ func main() {
 }
 ```
 
-標準の読み補正は `phonetic/reading_overrides.json` に同梱されています。辞書読みや標準補正と異なる読みを使いたい語句は、表層形ごとに追加・上書きできます。
+標準の読み補正は `phonetic/reading_overrides.json` に同梱されています。ここに載せるのは **形態素解析器が読み間違える語だけ** です。辞書が正しく読める語を書いても挙動は変わらず、本当に危ない語を見分けられなくするため、`TestDefaultReadingOverrides_NoRedundantEntries` が「辞書と同じ読み」のエントリを検出して失敗します。
+
+活用する語は語幹をキーにすると活用形をまとめて拾えます（`瞬い` → `マタタイ` が `瞬いて` `瞬いた` `瞬いている` に効く）。一致は形態素境界で終わるものだけを採用するので、`掌` → `テノヒラ` を入れても `掌握` は `ショウアク` のままです。
+
+辞書読みや標準補正と異なる読みを使いたい語句は、表層形ごとに追加・上書きできます。
 
 ```go
 converter, _ := phonetic.NewConverter(
@@ -96,6 +100,21 @@ func main() {
     _ = os.WriteFile("output.wav", combined, 0644)
 }
 ```
+
+#### フォーマットは揃っている必要があります
+
+結合はデコードを伴わず `data` チャンクのバイト列を連結するだけで、出力ヘッダーには先頭ファイルの `fmt` チャンクをそのまま使います。そのため、フォーマット種別・チャンネル数・サンプルレート・量子化ビット数のいずれかが食い違うファイルを渡すと `*wav.ErrMismatchedWAVFormat` を返します。
+
+```go
+combined, err := wav.CombineWavData(wavParts)
+if mismatch, ok := errors.AsType[*wav.ErrMismatchedWAVFormat](err); ok {
+    // WAVファイル #1 のサンプルレートが先頭ファイルと一致しません (48000 ≠ 24000)。
+    // デコードなしの結合はフォーマットが揃っている必要があります
+    log.Printf("結合できません: %v (index=%d)", mismatch, mismatch.Index)
+}
+```
+
+このチェックがないと、48kHz ステレオの音声が 24kHz モノラルのヘッダーで再生され、速度・音程・チャンネル割り当てがすべて狂ったまま「エラーなく」出力されます。フォーマットの異なる音声を繋ぐ場合は、事前にリサンプリングして揃えてください。
 
 ## 🏗 Project Structure
 
