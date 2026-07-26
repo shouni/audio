@@ -220,6 +220,81 @@ func TestDefaultReadingOverrides_KeepsPlainCompoundsUnoverridden(t *testing.T) {
 	}
 }
 
+// TestDefaultReadingOverrides_FixesMisreadings は、辞書が別語の読みを当ててしまう表記を
+// 上書きで正しく読ませることを確認します。
+//
+// 「瞬く」は辞書が「しばたく」を採用するため、歌詞に書くと シバタク と歌われます。連用形は
+// さらに崩れて シバタタイテ になります。活用形は語幹をキーにすると まとめて拾えます。
+func TestDefaultReadingOverrides_FixesMisreadings(t *testing.T) {
+	converter, err := NewConverter()
+	if err != nil {
+		t.Fatalf("failed to create converter: %v", err)
+	}
+
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{input: "瞬く光", want: "マタタクヒカリ"},
+		{input: "星が瞬いている", want: "ホシガマタタイテイル"},
+		{input: "揺蕩う波", want: "タユタウナミ"},
+		{input: "彷徨いの果て", want: "サマヨイノハテ"},
+		{input: "拘って生きる", want: "コダワッテイキル"},
+		{input: "君を労る", want: "キミオイタワル"},
+		{input: "街が黄昏れる", want: "マチガタソガレル"},
+		{input: "空が黄昏れて", want: "ソラガタソガレテ"},
+		{input: "黄昏の街", want: "タソガレノマチ"},
+		{input: "此方へおいで", want: "コチラエオイデ"},
+		{input: "僕等は我等", want: "ボクラワワレラ"},
+		{input: "夜風に吹かれ", want: "ヨカゼニフカレ"},
+		{input: "一途な想い", want: "イチズナオモイ"},
+		{input: "十六夜の月", want: "イザヨイノツキ"},
+		{input: "掌の熱", want: "テノヒラノネツ"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := converter.ConvertToReading(tt.input); got != tt.want {
+				t.Errorf("ConvertToReading(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestDefaultReadingOverrides_KeepsCompoundsIntact は、訓読み用の上書きが同じ漢字を含む
+// 音読みの熟語を壊さないことを確認します。
+//
+// 「瞬く」「拘る」「掌」「燈」のような短い上書きは、形態素境界で終わる一致だけを採用する
+// 仕組みに守られています。境界判定が壊れると 一瞬 が イチマタタク のように崩れます。
+func TestDefaultReadingOverrides_KeepsCompoundsIntact(t *testing.T) {
+	converter, err := NewConverter()
+	if err != nil {
+		t.Fatalf("failed to create converter: %v", err)
+	}
+
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{input: "一瞬", want: "イッシュン"},
+		{input: "瞬間", want: "シュンカン"},
+		{input: "拘束", want: "コウソク"},
+		{input: "掌握", want: "ショウアク"},
+		{input: "燈台", want: "トウダイ"},
+		{input: "動揺", want: "ドウヨウ"},
+		{input: "黄金", want: "オウゴン"},
+		{input: "苦労", want: "クロウ"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := converter.ConvertToReading(tt.input); got != tt.want {
+				t.Errorf("ConvertToReading(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLoadReadingOverridesJSON_RejectsEmptyValues(t *testing.T) {
 	tests := []struct {
 		name string
