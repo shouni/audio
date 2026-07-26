@@ -191,6 +191,35 @@ func TestDefaultReadingOverrides_Validation(t *testing.T) {
 	}
 }
 
+// TestDefaultReadingOverrides_KeepsPlainCompoundsUnoverridden は、辞書が正しく読める
+// 複合語に当て字を当てないことを確認します。
+//
+// 「設計図」を「レシピ」と読ませる上書きが入っていたことがあります。当て字は読みではなく
+// 語の置き換えなので、歌詞に「未来の設計図」と書いた利用者の意図した意味が失われます。
+// 当て字を足すなら、その語が当て字表記で流通しているもの（運命→サダメ 等）に限ります。
+func TestDefaultReadingOverrides_KeepsPlainCompoundsUnoverridden(t *testing.T) {
+	converter, err := NewConverter()
+	if err != nil {
+		t.Fatalf("failed to create converter: %v", err)
+	}
+
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{input: "設計図", want: "セッケイズ"},
+		{input: "未来の設計図", want: "ミライノセッケイズ"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := converter.ConvertToReading(tt.input); got != tt.want {
+				t.Errorf("ConvertToReading(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLoadReadingOverridesJSON_RejectsEmptyValues(t *testing.T) {
 	tests := []struct {
 		name string
