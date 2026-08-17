@@ -1,6 +1,8 @@
 package phonetic
 
 import (
+	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -196,6 +198,36 @@ func TestConverter_ConvertToReading_WithReadingOverrides(t *testing.T) {
 	}
 }
 
+// TestDefaultReadingOverridesJSON_NoDuplicateKeys は、同梱JSONに重複キーがないことを
+// 確認します。JSON の重複キーはエラーにならず後勝ちで上書きされるため、
+// 追記を重ねる運用では気付かないまま片方が死にます。
+func TestDefaultReadingOverridesJSON_NoDuplicateKeys(t *testing.T) {
+	dec := json.NewDecoder(bytes.NewReader(defaultReadingOverridesJSON))
+	if _, err := dec.Token(); err != nil { // 先頭の '{'
+		t.Fatalf("failed to read JSON: %v", err)
+	}
+
+	seen := make(map[string]bool)
+	for dec.More() {
+		keyToken, err := dec.Token()
+		if err != nil {
+			t.Fatalf("failed to read JSON key: %v", err)
+		}
+		key, ok := keyToken.(string)
+		if !ok {
+			t.Fatalf("unexpected JSON token: %v", keyToken)
+		}
+		if seen[key] {
+			t.Errorf("重複キー %q があります。後のエントリが前のエントリを上書きします", key)
+		}
+		seen[key] = true
+
+		if _, err := dec.Token(); err != nil { // 値を読み飛ばす
+			t.Fatalf("failed to read JSON value: %v", err)
+		}
+	}
+}
+
 func TestDefaultReadingOverrides_Validation(t *testing.T) {
 	overrides, err := loadReadingOverridesJSON(defaultReadingOverridesJSON)
 	if err != nil {
@@ -280,6 +312,18 @@ func TestDefaultReadingOverrides_FixesMisreadings(t *testing.T) {
 		{input: "一途な性格", want: "イチズナセイカク"},
 		{input: "十六夜の月", want: "イザヨイノツキ"},
 		{input: "掌を返す", want: "テノヒラオカエス"},
+		// 燦めく は 燦|めく に割れて 燦メク (素の辞書) / サンメク (燦→サン 上書き) になる
+		{input: "燦めく星座", want: "キラメクセイザ"},
+		{input: "夜空に燦めきを", want: "ヨゾラニキラメキオ"},
+		{input: "星が燦めいて", want: "ホシガキラメイテ"},
+		// 誰そ彼 は辞書が ダレソカレ と読む。時が付くと連濁で ドキ になる
+		{input: "誰そ彼の空", want: "タソガレノソラ"},
+		{input: "誰そ彼時の街", want: "タソガレドキノマチ"},
+		// 仄暗い は 仄|暗い に割れて 仄クライ になる
+		{input: "仄暗い部屋で", want: "ホノグライヘヤデ"},
+		{input: "仄暗く沈む", want: "ホノグラクシズム"},
+		// 檸檬 は辞書に読みがなく漢字のまま残る
+		{input: "檸檬の香り", want: "レモンノカオリ"},
 	}
 
 	for _, tt := range tests {
@@ -328,6 +372,8 @@ func TestDefaultReadingOverrides_KeepsCompoundsIntact(t *testing.T) {
 		// 保険としてここで固定する。
 		{input: "非同期", want: "ヒドウキ"},
 		{input: "非同期処理", want: "ヒドウキショリ"},
+		// 仄暗い の上書きが、辞書が正しく読める 仄か を巻き込まないこと
+		{input: "仄かな光", want: "ホノカナヒカリ"},
 	}
 
 	for _, tt := range tests {
