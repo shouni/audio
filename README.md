@@ -17,6 +17,7 @@
 *   **Lossless Binary Merging**: WAV セクションをデコードなしでバイナリレベルで直接結合。再エンコードによる世代損失（音質劣化）をゼロに抑えた長尺構成を実現。
 *   **Phonetic Text Processing**: 日本語の形態素解析に基づき、音声合成エンジンが解釈しやすい読み（カタカナ）を生成。助詞の歌唱用補正と、同梱 JSON 辞書による表層形ごとの読み補正を標準装備。
 *   **Dynamic Chunk Analysis**: RIFF/WAVE 構造を動的に解析し、`fmt` や `data` チャンクを正確に特定。メタデータが含まれる複雑なファイルにも対応。
+*   **Format Inspection**: `Inspect` により、結合せずに WAV のフォーマット・データサイズ・再生時間を取得可能。
 *   **Memory Efficient**: 最終的なバッファサイズを事前に計算し、最小限のアロケーションで高速に処理。
 *   **Production Ready**: フォーマット不一致の検出、4GB 超過チェック、不正なヘッダーに対する厳密なバリデーションを標準装備。
 
@@ -65,6 +66,10 @@ converter, _ := phonetic.NewConverter(
 reading := converter.ConvertToReading("私は閃光")
 fmt.Println(reading) // Output: ワタシワセンコウ
 ```
+
+標準の読み補正を使わず辞書読みだけにしたい場合は `WithoutDefaultReadingOverrides()` を指定します。独自の上書きと併用する場合は、この Option を先に指定してください（Option は指定順に適用されます）。
+
+辞書に読みがない未知語は表層形で代用されますが、ひらがなはカタカナへ正規化されるため、出力がひらがな混じりになることはありません。
 
 文節境界（助詞・助動詞の直後）にスペースを挿入することで、TTS エンジンが自然なイントネーションで読み上げやすくなります。
 
@@ -115,6 +120,20 @@ if mismatch, ok := errors.AsType[*wav.ErrMismatchedWAVFormat](err); ok {
 ```
 
 このチェックがないと、48kHz ステレオの音声が 24kHz モノラルのヘッダーで再生され、速度・音程・チャンネル割り当てがすべて狂ったまま「エラーなく」出力されます。フォーマットの異なる音声を繋ぐ場合は、事前にリサンプリングして揃えてください。
+
+#### 結合前の検査 (Inspect)
+
+`Inspect` は結合と同じ検証を行い、フォーマットと再生時間を返します。結合前の事前チェックや、生成された音声の長さの見積もりに使えます。
+
+```go
+info, err := wav.Inspect(wavBytes)
+if err != nil {
+    return err
+}
+fmt.Printf("%dHz %dch %dbit, %v\n",
+    info.Format.SampleRate, info.Format.NumChannels, info.Format.BitsPerSample, info.Duration())
+// 例: 24000Hz 1ch 16bit, 3.2s
+```
 
 ## 🏗 Project Structure
 

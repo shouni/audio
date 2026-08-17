@@ -376,6 +376,79 @@ func TestDefaultReadingOverrides_NoRedundantEntries(t *testing.T) {
 	}
 }
 
+func TestHiraganaToKatakana(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"ぴえん", "ピエン"},
+		{"abcぴえん123", "abcピエン123"},
+		{"ピエン", "ピエン"},
+		{"ゔ", "ヴ"},
+		{"漢字とかな", "漢字トカナ"},
+		{"、。ー[Verse]", "、。ー[Verse]"},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := hiraganaToKatakana(tt.input); got != tt.want {
+				t.Errorf("hiraganaToKatakana(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestConverter_ConvertToReading_NormalizesUnknownHiragana は、辞書に読みがない語の
+// 表層形フォールバックがひらがなのまま出力されないことを確認します。
+// 出力の契約はカタカナなので、未知語のひらがなはカタカナへ正規化されます。
+func TestConverter_ConvertToReading_NormalizesUnknownHiragana(t *testing.T) {
+	converter, err := NewConverter()
+	if err != nil {
+		t.Fatalf("failed to create converter: %v", err)
+	}
+
+	for _, input := range []string{"ぴえんな夜", "うぇーいと叫ぶ"} {
+		t.Run(input, func(t *testing.T) {
+			got := converter.ConvertToReading(input)
+			if strings.ContainsFunc(got, isConvertibleHiragana) {
+				t.Errorf("ConvertToReading(%q) = %q にひらがなが残っています", input, got)
+			}
+		})
+	}
+}
+
+func TestConverter_WithoutDefaultReadingOverrides(t *testing.T) {
+	withDefaults, err := NewConverter()
+	if err != nil {
+		t.Fatalf("failed to create converter: %v", err)
+	}
+	without, err := NewConverter(WithoutDefaultReadingOverrides())
+	if err != nil {
+		t.Fatalf("failed to create converter: %v", err)
+	}
+
+	const input = "こんにちは"
+	if got := withDefaults.ConvertToReading(input); got != "コンニチワ" {
+		t.Errorf("標準上書きあり = %q, want コンニチワ", got)
+	}
+	if got := without.ConvertToReading(input); got != "コンニチハ" {
+		t.Errorf("標準上書きなし = %q, want コンニチハ (辞書読みのまま)", got)
+	}
+
+	// 標準を外した上で独自の上書きだけを載せられること（Option は指定順に適用）
+	custom, err := NewConverter(
+		WithoutDefaultReadingOverrides(),
+		WithReadingOverrides(map[string]string{"こんにちは": "チーッス"}),
+	)
+	if err != nil {
+		t.Fatalf("failed to create converter: %v", err)
+	}
+	if got := custom.ConvertToReading(input); got != "チーッス" {
+		t.Errorf("独自上書き = %q, want チーッス", got)
+	}
+}
+
 func TestLoadReadingOverridesJSON_RejectsEmptyValues(t *testing.T) {
 	tests := []struct {
 		name string

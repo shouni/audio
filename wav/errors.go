@@ -12,6 +12,7 @@ func (e *ErrNoAudioData) Error() string {
 // ErrInvalidWAVHeader は、WAV ヘッダーの検証に失敗した場合に発生します。
 type ErrInvalidWAVHeader struct {
 	// Index はエラーが発生した WAV ファイルのインデックスです。
+	// Inspect のように一覧に属さない検証では -1 になります。
 	Index int
 	// Details はエラーの詳細情報です。
 	Details string

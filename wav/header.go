@@ -47,28 +47,17 @@ type wavChunk struct {
 	size   uint32
 }
 
-// wavFormat は、結合してよいかどうかを決める fmt チャンクの値です。
-//
-// 結合はデコードせずに data チャンクのバイト列を連結するだけなので、これらが揃っていない
-// ファイルを繋ぐと、2本目以降が先頭ファイルのフォーマットとして再生されます。
-// 音は出るが速度も音程もチャンネルの割り当ても狂うため、エラーとして弾きます。
-type wavFormat struct {
-	audioFormat   uint16
-	numChannels   uint16
-	sampleRate    uint32
-	bitsPerSample uint16
-}
-
 // wavParts は1つの WAV から取り出した、結合に必要な部品です。
 type wavParts struct {
 	// formatHeader は data チャンク直前までの、そのまま出力へ引き継ぐヘッダーです。
 	formatHeader []byte
-	format       wavFormat
+	format       Format
 	audioData    []byte
 }
 
 // extractAudioData は WAV ファイルからフォーマット情報と音声データ部分を抽出します。
 // fmt および data チャンクを動的に探索し、data チャンクの直前までを formatHeader とします。
+// index はエラーメッセージに含めるファイル位置で、一覧に属さない検証では -1 を渡します。
 func extractAudioData(wavBytes []byte, index int) (wavParts, error) {
 	if err := validateRiffHeader(wavBytes, index); err != nil {
 		return wavParts{}, err
@@ -79,20 +68,10 @@ func extractAudioData(wavBytes []byte, index int) (wavParts, error) {
 		return wavParts{}, err
 	}
 
-	audioData := chunkPayload(wavBytes, dataChunk)
-
-	// 抽出されたデータサイズがヘッダーの記載と一致するか最終確認
-	if uint64(len(audioData)) != uint64(dataChunk.size) {
-		return wavParts{}, &ErrInvalidWAVHeader{
-			Index:   index,
-			Details: "最終的な抽出データサイズがヘッダー記載サイズと一致しません",
-		}
-	}
-
 	return wavParts{
 		formatHeader: wavBytes[0:dataChunk.offset],
 		format:       format,
-		audioData:    audioData,
+		audioData:    chunkPayload(wavBytes, dataChunk),
 	}, nil
 }
 
@@ -114,9 +93,9 @@ func validateRiffHeader(wavBytes []byte, index int) error {
 }
 
 // scanWavChunks は WAV チャンク列を走査し、fmt チャンクの内容と data チャンクを返します。
-func scanWavChunks(wavBytes []byte, index int) (wavFormat, wavChunk, error) {
+func scanWavChunks(wavBytes []byte, index int) (Format, wavChunk, error) {
 	var (
-		format        wavFormat
+		format        Format
 		fmtChunkFound bool
 	)
 
@@ -134,18 +113,18 @@ func scanWavChunks(wavBytes []byte, index int) (wavFormat, wavChunk, error) {
 		if chunk.id == "fmt " {
 			parsed, err := parseFormatChunk(wavBytes, chunk, index)
 			if err != nil {
-				return wavFormat{}, wavChunk{}, err
+				return Format{}, wavChunk{}, err
 			}
 			format = parsed
 			fmtChunkFound = true
 		}
 		if chunk.id == "data" {
 			if !fmtChunkFound {
-				return wavFormat{}, wavChunk{}, missingWavChunkError(index, false, true)
+				return Format{}, wavChunk{}, missingWavChunkError(index, false, true)
 			}
 			dataChunk, err := validateDataChunk(wavBytes, chunk, index)
 			if err != nil {
-				return wavFormat{}, wavChunk{}, err
+				return Format{}, wavChunk{}, err
 			}
 			return format, dataChunk, nil
 		}
@@ -157,25 +136,25 @@ func scanWavChunks(wavBytes []byte, index int) (wavFormat, wavChunk, error) {
 		offset = int(nextOffset)
 	}
 
-	return wavFormat{}, wavChunk{}, missingWavChunkError(index, fmtChunkFound, false)
+	return Format{}, wavChunk{}, missingWavChunkError(index, fmtChunkFound, false)
 }
 
 // parseFormatChunk は fmt チャンクから、結合可否の判定に使う値を読み出します。
-func parseFormatChunk(wavBytes []byte, chunk wavChunk, index int) (wavFormat, error) {
+func parseFormatChunk(wavBytes []byte, chunk wavChunk, index int) (Format, error) {
 	payloadStart := chunk.offset + dataChunkHeaderSize
 	// PCM の fmt チャンクは 16 バイト。拡張形式はより長いが、先頭 16 バイトの並びは共通。
 	if uint64(chunk.size) < minFormatChunkSize || payloadStart+minFormatChunkSize > len(wavBytes) {
-		return wavFormat{}, &ErrInvalidWAVHeader{
+		return Format{}, &ErrInvalidWAVHeader{
 			Index:   index,
 			Details: fmt.Sprintf("fmtチャンクが短すぎます (%dバイト、最低%dバイト必要)", chunk.size, minFormatChunkSize),
 		}
 	}
 
-	return wavFormat{
-		audioFormat:   binary.LittleEndian.Uint16(wavBytes[payloadStart:]),
-		numChannels:   binary.LittleEndian.Uint16(wavBytes[payloadStart+2:]),
-		sampleRate:    binary.LittleEndian.Uint32(wavBytes[payloadStart+4:]),
-		bitsPerSample: binary.LittleEndian.Uint16(wavBytes[payloadStart+14:]),
+	return Format{
+		AudioFormat:   binary.LittleEndian.Uint16(wavBytes[payloadStart:]),
+		NumChannels:   binary.LittleEndian.Uint16(wavBytes[payloadStart+2:]),
+		SampleRate:    binary.LittleEndian.Uint32(wavBytes[payloadStart+4:]),
+		BitsPerSample: binary.LittleEndian.Uint16(wavBytes[payloadStart+14:]),
 	}, nil
 }
 

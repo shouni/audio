@@ -8,6 +8,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/ikawaha/kagome-dict/ipa"
 	"github.com/ikawaha/kagome/v2/tokenizer"
@@ -20,11 +21,17 @@ var defaultReadingOverridesJSON []byte
 //
 // Converter は形態素解析器の辞書読みを基にしつつ、助詞「は」「へ」「を」の
 // 発音補正と、表層形に対する読みの上書きを適用します。
+//
+// 生成後に内部状態を変更しないため、1つの Converter を複数のゴルーチンから
+// 同時に利用できます（Option による設定は生成時のみ有効です）。
 type Converter struct {
 	t                *tokenizer.Tokenizer
 	readingOverrides map[string]string
-	overrideKeys     []string
-	phraseSpacing    bool
+	// overrideKeysByFirstRune は、読み上書きのキーを先頭ルーンごとにまとめ、
+	// 各グループ内を最長一致用に長い順で保持します。トークンごとの照合を
+	// 全キーの走査ではなく先頭文字が一致するキーだけに絞るための索引です。
+	overrideKeysByFirstRune map[rune][]string
+	phraseSpacing           bool
 }
 
 // Option は Converter の生成時に変換動作を調整する関数です。
@@ -59,6 +66,16 @@ func WithReadingOverrides(overrides map[string]string) Option {
 			}
 			c.readingOverrides[surface] = reading
 		}
+		c.rebuildOverrideKeys()
+	}
+}
+
+// WithoutDefaultReadingOverrides は同梱の標準読み上書きを外し、辞書読みだけを
+// 使う Option を返します。WithReadingOverrides と併用する場合は、この Option を
+// 先に指定してください（Option は指定順に適用されます）。
+func WithoutDefaultReadingOverrides() Option {
+	return func(c *Converter) {
+		c.readingOverrides = map[string]string{}
 		c.rebuildOverrideKeys()
 	}
 }
@@ -103,8 +120,9 @@ func (c *Converter) ConvertToReading(input string) string {
 
 		surface, reading, ok := c.matchOverrideAt(input, token.Position, boundaries)
 		if !ok {
-			sb.WriteString(tokenReading(token))
-			c.writePhraseBreak(&sb, token)
+			features := token.Features()
+			sb.WriteString(tokenReading(token, features))
+			c.writePhraseBreak(&sb, features)
 			i++
 			continue
 		}
@@ -117,7 +135,7 @@ func (c *Converter) ConvertToReading(input string) string {
 			last = i
 			i++
 		}
-		c.writePhraseBreak(&sb, tokens[last])
+		c.writePhraseBreak(&sb, tokens[last].Features())
 	}
 
 	result := sb.String()
@@ -128,8 +146,8 @@ func (c *Converter) ConvertToReading(input string) string {
 }
 
 // writePhraseBreak は、文節境界のトークン直後にスペースを書き込みます。
-func (c *Converter) writePhraseBreak(sb *strings.Builder, token tokenizer.Token) {
-	if c.phraseSpacing && isPhraseBreak(token) {
+func (c *Converter) writePhraseBreak(sb *strings.Builder, features []string) {
+	if c.phraseSpacing && isPhraseBreak(features) {
 		sb.WriteByte(' ')
 	}
 }
@@ -147,7 +165,8 @@ func tokenBoundaries(input string, tokens []tokenizer.Token) map[int]struct{} {
 // matchOverrideAt は、start から始まり形態素境界で終わる最長の読み上書きを返します。
 func (c *Converter) matchOverrideAt(input string, start int, boundaries map[int]struct{}) (string, string, bool) {
 	rest := input[start:]
-	for _, surface := range c.overrideKeys {
+	first, _ := utf8.DecodeRuneInString(rest)
+	for _, surface := range c.overrideKeysByFirstRune[first] {
 		if !strings.HasPrefix(rest, surface) {
 			continue
 		}
@@ -159,12 +178,20 @@ func (c *Converter) matchOverrideAt(input string, start int, boundaries map[int]
 	return "", "", false
 }
 
-// rebuildOverrideKeys は読み上書きのキーを最長一致用の順序に並べ直します。
+// rebuildOverrideKeys は読み上書きのキーを先頭ルーンごとの索引に組み直します。
+// 各グループは最長一致用に長い順で保持します。
 func (c *Converter) rebuildOverrideKeys() {
-	c.overrideKeys = slices.Collect(maps.Keys(c.readingOverrides))
-	slices.SortFunc(c.overrideKeys, func(a, b string) int {
+	keys := slices.Collect(maps.Keys(c.readingOverrides))
+	slices.SortFunc(keys, func(a, b string) int {
 		return len(b) - len(a)
 	})
+
+	buckets := make(map[rune][]string, len(keys))
+	for _, key := range keys {
+		first, _ := utf8.DecodeRuneInString(key)
+		buckets[first] = append(buckets[first], key)
+	}
+	c.overrideKeysByFirstRune = buckets
 }
 
 // cloneReadingOverrides は読み上書きのマップを複製します。
@@ -204,28 +231,50 @@ func validReadingOverride(surface, reading string) bool {
 }
 
 // tokenReading は1トークンの辞書読みを返し、助詞の発音を補正します。
-func tokenReading(token tokenizer.Token) string {
-	features := token.Features()
-	reading := dictionaryReading(token, features)
+func tokenReading(token tokenizer.Token, features []string) string {
 	if corrected, ok := particleReading(token, features); ok {
 		return corrected
 	}
-	return reading
+	return dictionaryReading(token, features)
 }
 
+// dictionaryReading は辞書の読みを返します。辞書に読みがない語（未知語や記号）は
+// 表層形で代用しますが、出力の契約はカタカナなので、ひらがなだけはカタカナへ正規化します。
 func dictionaryReading(token tokenizer.Token, features []string) string {
 	const (
 		readingIndex = 7
 	)
 
 	if len(features) <= readingIndex || features[readingIndex] == "*" {
-		return token.Surface
+		return hiraganaToKatakana(token.Surface)
 	}
 	return features[readingIndex]
 }
 
-func isPhraseBreak(token tokenizer.Token) bool {
-	features := token.Features()
+// hiraganaToKatakana は文字列中のひらがなを対応するカタカナに写します。
+// それ以外の文字（カタカナ・漢字・英数字・記号）は変更しません。
+func hiraganaToKatakana(s string) string {
+	if !strings.ContainsFunc(s, isConvertibleHiragana) {
+		return s
+	}
+	return strings.Map(func(r rune) rune {
+		if isConvertibleHiragana(r) {
+			return r + hiraganaToKatakanaOffset
+		}
+		return r
+	}, s)
+}
+
+// hiraganaToKatakanaOffset は Unicode 上のひらがな・カタカナブロック間の距離です。
+const hiraganaToKatakanaOffset = 'ア' - 'あ'
+
+// isConvertibleHiragana は、対応するカタカナが存在するひらがなかを判定します。
+// ぁ (U+3041) 〜 ゖ (U+3096) と、繰り返し記号 ゝ ゞ が対象です。
+func isConvertibleHiragana(r rune) bool {
+	return (r >= 'ぁ' && r <= 'ゖ') || r == 'ゝ' || r == 'ゞ'
+}
+
+func isPhraseBreak(features []string) bool {
 	if len(features) == 0 {
 		return false
 	}
