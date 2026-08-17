@@ -150,6 +150,11 @@ func TestConverter_ConvertToReading_WithPhraseSpacing(t *testing.T) {
 			input: "夜の",
 			want:  "ヨルノ",
 		},
+		{
+			name:  "行末の助詞後スペースは行ごとにトリム",
+			input: "夜の\n朝が来る",
+			want:  "ヨルノ\nアサガ クル",
+		},
 		// 読み上書きを先に適用して入力を分断すると、残った「が」が単独で解析されて
 		// 助詞ではなく接続詞と判定され、文節スペースが落ちる。
 		{
@@ -357,9 +362,14 @@ func TestDefaultReadingOverrides_NoRedundantEntries(t *testing.T) {
 		t.Fatalf("failed to create converter: %v", err)
 	}
 
+	// "[Chorus] %s" は同一行に英語タグがある文脈。記号・未知語の直後は
+	// ラティスの経路が変わり、単独では正しく読める語が割れることがある
+	// （重なる → 重/なる でオモナル）。行頭の改行文脈は行分割で吸収されるため、
+	// ここで確かめるのは同一行の記号直後だけでよい。
 	contexts := []string{
 		"%s", "%sが好き", "%sを抱いて", "%sの向こう", "君の%s",
 		"遠い%sへ", "%sだけが残る", "静かな%sと", "%sは終わらない",
+		"[Chorus] %s",
 	}
 
 	for surface := range defaultReadingOverrides {
@@ -372,6 +382,54 @@ func TestDefaultReadingOverrides_NoRedundantEntries(t *testing.T) {
 			}
 			t.Errorf("上書き %q (%q) は全文脈で辞書の読みと一致します。辞書が正しく読めるので削除してください",
 				surface, defaultReadingOverrides[surface])
+		})
+	}
+}
+
+// TestConverter_ConvertToReading_LineInitialWords は、改行や英語タグの直後でも
+// 行頭の語の読みが変わらないことを確認します。
+//
+// 改行を跨いで一括解析すると、行頭の語が直前の記号・未知語の文脈に引きずられて
+// 分割が変わります（「重なる」が 重/なる に割れてオモナルになる）。入力を行ごとに
+// 解析することで防いでいます。同一行に記号がある場合は読み上書きで補正します。
+func TestConverter_ConvertToReading_LineInitialWords(t *testing.T) {
+	converter, err := NewConverter()
+	if err != nil {
+		t.Fatalf("failed to create converter: %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "タグ行の直後",
+			input: "[Chorus]\n重なる鼓動",
+			want:  "[Chorus]\nカサナルコドウ",
+		},
+		{
+			name:  "行頭の改行直後",
+			input: "\n重なる",
+			want:  "\nカサナル",
+		},
+		{
+			name:  "行またぎ",
+			input: "声が\n重なる",
+			want:  "コエガ\nカサナル",
+		},
+		{
+			name:  "同一行のタグ直後は読み上書きで補正",
+			input: "[Chorus] 重なる鼓動",
+			want:  "[Chorus] カサナルコドウ",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := converter.ConvertToReading(tt.input); got != tt.want {
+				t.Errorf("ConvertToReading(%q) = %q, want %q", tt.input, got, tt.want)
+			}
 		})
 	}
 }

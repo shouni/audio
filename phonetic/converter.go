@@ -101,14 +101,36 @@ func NewConverter(options ...Option) (*Converter, error) {
 
 // ConvertToReading は input をカタカナの読みに変換します。
 //
-// 変換は input 全体を一度だけ形態素解析し、その結果に読み上書きを重ねる順序で行います。
+// 入力は改行で行に分割し、行ごとに形態素解析します。改行を跨いで一括解析すると、
+// 行頭の語が直前の記号・未知語（英語タグ等）の文脈に引きずられて分割が変わるためです
+// （例: "[Chorus]\n重なる" を一括で解析すると 重なる が 重/なる に割れてオモナルになる）。
+// 歌詞では行が文の単位なので、行単位の解析が品詞判定としても正しくなります。
+func (c *Converter) ConvertToReading(input string) string {
+	if !strings.Contains(input, "\n") {
+		return c.convertLine(input)
+	}
+
+	lines := strings.Split(input, "\n")
+	for i, line := range lines {
+		lines[i] = c.convertLine(line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// convertLine は1行分のテキストをカタカナの読みに変換します。
+//
+// 変換は行全体を一度だけ形態素解析し、その結果に読み上書きを重ねる順序で行います。
 // 上書きを先に適用して入力を分断すると、残った断片が文脈を失った状態で解析され、
 // 品詞が誤判定されます（例: 「運命の閃光が」の「が」は、単独で解析すると助詞ではなく
 // 接続詞になり、助詞前提の読み補正と文節スペースが両方とも外れる）。
 //
 // 読み上書きは形態素の境界で始まり境界で終わる一致だけを採用します。境界をまたぐ一致まで
 // 拾うと、上書きが覆い切れなかった残りの文字が欠落します（例: 「世界観」に対する「世界」）。
-func (c *Converter) ConvertToReading(input string) string {
+func (c *Converter) convertLine(input string) string {
+	if input == "" {
+		return ""
+	}
+
 	tokens := c.t.Tokenize(input)
 	boundaries := tokenBoundaries(input, tokens)
 
