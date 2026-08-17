@@ -1,6 +1,8 @@
 package phonetic
 
 import (
+	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -150,6 +152,11 @@ func TestConverter_ConvertToReading_WithPhraseSpacing(t *testing.T) {
 			input: "夜の",
 			want:  "ヨルノ",
 		},
+		{
+			name:  "行末の助詞後スペースは行ごとにトリム",
+			input: "夜の\n朝が来る",
+			want:  "ヨルノ\nアサガ クル",
+		},
 		// 読み上書きを先に適用して入力を分断すると、残った「が」が単独で解析されて
 		// 助詞ではなく接続詞と判定され、文節スペースが落ちる。
 		{
@@ -188,6 +195,36 @@ func TestConverter_ConvertToReading_WithReadingOverrides(t *testing.T) {
 	want := "ワタシワセンコウ"
 	if got != want {
 		t.Errorf("ConvertToReading() = %q, want %q", got, want)
+	}
+}
+
+// TestDefaultReadingOverridesJSON_NoDuplicateKeys は、同梱JSONに重複キーがないことを
+// 確認します。JSON の重複キーはエラーにならず後勝ちで上書きされるため、
+// 追記を重ねる運用では気付かないまま片方が死にます。
+func TestDefaultReadingOverridesJSON_NoDuplicateKeys(t *testing.T) {
+	dec := json.NewDecoder(bytes.NewReader(defaultReadingOverridesJSON))
+	if _, err := dec.Token(); err != nil { // 先頭の '{'
+		t.Fatalf("failed to read JSON: %v", err)
+	}
+
+	seen := make(map[string]bool)
+	for dec.More() {
+		keyToken, err := dec.Token()
+		if err != nil {
+			t.Fatalf("failed to read JSON key: %v", err)
+		}
+		key, ok := keyToken.(string)
+		if !ok {
+			t.Fatalf("unexpected JSON token: %v", keyToken)
+		}
+		if seen[key] {
+			t.Errorf("重複キー %q があります。後のエントリが前のエントリを上書きします", key)
+		}
+		seen[key] = true
+
+		if _, err := dec.Token(); err != nil { // 値を読み飛ばす
+			t.Fatalf("failed to read JSON value: %v", err)
+		}
 	}
 }
 
@@ -275,6 +312,53 @@ func TestDefaultReadingOverrides_FixesMisreadings(t *testing.T) {
 		{input: "一途な性格", want: "イチズナセイカク"},
 		{input: "十六夜の月", want: "イザヨイノツキ"},
 		{input: "掌を返す", want: "テノヒラオカエス"},
+		// 燦めく は 燦|めく に割れて 燦メク (素の辞書) / サンメク (燦→サン 上書き) になる
+		{input: "燦めく星座", want: "キラメクセイザ"},
+		{input: "夜空に燦めきを", want: "ヨゾラニキラメキオ"},
+		{input: "星が燦めいて", want: "ホシガキラメイテ"},
+		// 誰そ彼 は辞書が ダレソカレ と読む。時が付くと連濁で ドキ になる
+		{input: "誰そ彼の空", want: "タソガレノソラ"},
+		{input: "誰そ彼時の街", want: "タソガレドキノマチ"},
+		// 仄暗い は 仄|暗い に割れて 仄クライ になる
+		{input: "仄暗い部屋で", want: "ホノグライヘヤデ"},
+		{input: "仄暗く沈む", want: "ホノグラクシズム"},
+		// 檸檬 は辞書に読みがなく漢字のまま残る
+		{input: "檸檬の香り", want: "レモンノカオリ"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := converter.ConvertToReading(tt.input); got != tt.want {
+				t.Errorf("ConvertToReading(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestDefaultReadingOverrides_FixesImperatives は、接尾辞や別動詞と同形の命令形が
+// 化けないことを確認します。
+//
+// 「立て」は単独だと接尾辞の ダテ（二本立て等）として解析され、「打て」は記号の
+// 直後で 打つ（ブツ）側の ブテ に化け、「絶て」は名詞の直後で 絶っ＋て（ゼッテ）に
+// 割れます。命令形は歌詞では行頭・単独で置かれることが多く、この化け方は目立ちます。
+func TestDefaultReadingOverrides_FixesImperatives(t *testing.T) {
+	converter, err := NewConverter()
+	if err != nil {
+		t.Fatalf("failed to create converter: %v", err)
+	}
+
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{input: "立て", want: "タテ"},
+		{input: "さあ立て", want: "サアタテ"},
+		{input: "君よ立て", want: "キミヨタテ"},
+		{input: "[Chorus] 打て", want: "[Chorus] ウテ"},
+		{input: "打て…", want: "ウテ…"},
+		// 絶て の上書きで ゼッテ 化けは直る。直前の「今」が名詞連続の解析に
+		// 引きずられて コン と読まれる問題はラティス由来で、上書きでは直せない。
+		{input: "今絶て", want: "コンタテ"},
 	}
 
 	for _, tt := range tests {
@@ -323,6 +407,16 @@ func TestDefaultReadingOverrides_KeepsCompoundsIntact(t *testing.T) {
 		// 保険としてここで固定する。
 		{input: "非同期", want: "ヒドウキ"},
 		{input: "非同期処理", want: "ヒドウキショリ"},
+		// 仄暗い の上書きが、辞書が正しく読める 仄か を巻き込まないこと
+		{input: "仄かな光", want: "ホノカナヒカリ"},
+		// 立て→タテ の上書きが、接尾辞 ダテ の複合語や別読みの熟語を巻き込まないこと
+		{input: "二本立て", want: "ニホンダテ"},
+		{input: "献立", want: "コンダテ"},
+		{input: "旅立て", want: "タビダテ"},
+		{input: "仕立て", want: "シタテ"},
+		{input: "夕立", want: "ユウダチ"},
+		{input: "打ち上げ", want: "ウチアゲ"},
+		{input: "博打", want: "バクチ"},
 	}
 
 	for _, tt := range tests {
@@ -357,9 +451,16 @@ func TestDefaultReadingOverrides_NoRedundantEntries(t *testing.T) {
 		t.Fatalf("failed to create converter: %v", err)
 	}
 
+	// "[Chorus] %s" は同一行に英語タグがある文脈。記号・未知語の直後は
+	// ラティスの経路が変わり、単独では正しく読める語が割れることがある
+	// （重なる → 重/なる でオモナル）。行頭の改行文脈は行分割で吸収されるため、
+	// ここで確かめるのは同一行の記号直後だけでよい。
+	// "今%s" は名詞が直前に来る文脈。命令形が接尾辞として解釈される誤読
+	// （今絶て → コンゼッテ）はこの形でだけ現れる。
 	contexts := []string{
 		"%s", "%sが好き", "%sを抱いて", "%sの向こう", "君の%s",
 		"遠い%sへ", "%sだけが残る", "静かな%sと", "%sは終わらない",
+		"[Chorus] %s", "今%s",
 	}
 
 	for surface := range defaultReadingOverrides {
@@ -373,6 +474,127 @@ func TestDefaultReadingOverrides_NoRedundantEntries(t *testing.T) {
 			t.Errorf("上書き %q (%q) は全文脈で辞書の読みと一致します。辞書が正しく読めるので削除してください",
 				surface, defaultReadingOverrides[surface])
 		})
+	}
+}
+
+// TestConverter_ConvertToReading_LineInitialWords は、改行や英語タグの直後でも
+// 行頭の語の読みが変わらないことを確認します。
+//
+// 改行を跨いで一括解析すると、行頭の語が直前の記号・未知語の文脈に引きずられて
+// 分割が変わります（「重なる」が 重/なる に割れてオモナルになる）。入力を行ごとに
+// 解析することで防いでいます。同一行に記号がある場合は読み上書きで補正します。
+func TestConverter_ConvertToReading_LineInitialWords(t *testing.T) {
+	converter, err := NewConverter()
+	if err != nil {
+		t.Fatalf("failed to create converter: %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "タグ行の直後",
+			input: "[Chorus]\n重なる鼓動",
+			want:  "[Chorus]\nカサナルコドウ",
+		},
+		{
+			name:  "行頭の改行直後",
+			input: "\n重なる",
+			want:  "\nカサナル",
+		},
+		{
+			name:  "行またぎ",
+			input: "声が\n重なる",
+			want:  "コエガ\nカサナル",
+		},
+		{
+			name:  "同一行のタグ直後は読み上書きで補正",
+			input: "[Chorus] 重なる鼓動",
+			want:  "[Chorus] カサナルコドウ",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := converter.ConvertToReading(tt.input); got != tt.want {
+				t.Errorf("ConvertToReading(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHiraganaToKatakana(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"ぴえん", "ピエン"},
+		{"abcぴえん123", "abcピエン123"},
+		{"ピエン", "ピエン"},
+		{"ゔ", "ヴ"},
+		{"漢字とかな", "漢字トカナ"},
+		{"、。ー[Verse]", "、。ー[Verse]"},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := hiraganaToKatakana(tt.input); got != tt.want {
+				t.Errorf("hiraganaToKatakana(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestConverter_ConvertToReading_NormalizesUnknownHiragana は、辞書に読みがない語の
+// 表層形フォールバックがひらがなのまま出力されないことを確認します。
+// 出力の契約はカタカナなので、未知語のひらがなはカタカナへ正規化されます。
+func TestConverter_ConvertToReading_NormalizesUnknownHiragana(t *testing.T) {
+	converter, err := NewConverter()
+	if err != nil {
+		t.Fatalf("failed to create converter: %v", err)
+	}
+
+	for _, input := range []string{"ぴえんな夜", "うぇーいと叫ぶ"} {
+		t.Run(input, func(t *testing.T) {
+			got := converter.ConvertToReading(input)
+			if strings.ContainsFunc(got, isConvertibleHiragana) {
+				t.Errorf("ConvertToReading(%q) = %q にひらがなが残っています", input, got)
+			}
+		})
+	}
+}
+
+func TestConverter_WithoutDefaultReadingOverrides(t *testing.T) {
+	withDefaults, err := NewConverter()
+	if err != nil {
+		t.Fatalf("failed to create converter: %v", err)
+	}
+	without, err := NewConverter(WithoutDefaultReadingOverrides())
+	if err != nil {
+		t.Fatalf("failed to create converter: %v", err)
+	}
+
+	const input = "こんにちは"
+	if got := withDefaults.ConvertToReading(input); got != "コンニチワ" {
+		t.Errorf("標準上書きあり = %q, want コンニチワ", got)
+	}
+	if got := without.ConvertToReading(input); got != "コンニチハ" {
+		t.Errorf("標準上書きなし = %q, want コンニチハ (辞書読みのまま)", got)
+	}
+
+	// 標準を外した上で独自の上書きだけを載せられること（Option は指定順に適用）
+	custom, err := NewConverter(
+		WithoutDefaultReadingOverrides(),
+		WithReadingOverrides(map[string]string{"こんにちは": "チーッス"}),
+	)
+	if err != nil {
+		t.Fatalf("failed to create converter: %v", err)
+	}
+	if got := custom.ConvertToReading(input); got != "チーッス" {
+		t.Errorf("独自上書き = %q, want チーッス", got)
 	}
 }
 
