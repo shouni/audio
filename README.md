@@ -141,7 +141,7 @@ fmt.Printf("%dHz %dch %dbit, %v\n",
 
 ```text
 audio/
-├── wav/             # 音響バイナリ操作 (Merging, Validation, Header Analysis)
+├── wav/             # 音響バイナリ操作 (Merging, Inspection, Validation)
 ├── phonetic/        # 日本語解析・音韻変換 (Tokenizing, Reading, Particle Correction)
 │   └── reading_overrides.json  # 標準の読み補正辞書
 ├── go.mod

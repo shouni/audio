@@ -211,10 +211,10 @@ func TestExtractAudioDataRejectsBrokenHeaders(t *testing.T) {
 func insertChunkBeforeData(wavBytes []byte, id string, payload []byte) []byte {
 	const dataChunkStart = 36
 
-	chunk := make([]byte, dataChunkHeaderSize+len(payload))
+	chunk := make([]byte, chunkHeaderSize+len(payload))
 	copy(chunk[0:], id)
 	binary.LittleEndian.PutUint32(chunk[4:], uint32(len(payload)))
-	copy(chunk[dataChunkHeaderSize:], payload)
+	copy(chunk[chunkHeaderSize:], payload)
 	if len(payload)%2 != 0 {
 		chunk = append(chunk, 0)
 	}

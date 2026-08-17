@@ -7,39 +7,30 @@ import (
 	"math"
 )
 
-// RIFF 構造および WAV ファイルの解析に必要なサイズ定数です。
+// RIFF 構造の解析に使用するサイズ定数です。
 const (
-	// riffChunkIDSize は "RIFF" チャンクIDのサイズ（バイト）です。
-	riffChunkIDSize = 4
-	// riffChunkSizeSize はファイルサイズフィールドのサイズ（バイト）です。
-	riffChunkSizeSize = 4
+	// chunkIDSize は、チャンクID ("RIFF", "fmt ", "data" 等) のサイズ（バイト）です。
+	chunkIDSize = 4
+	// chunkSizeSize は、チャンクサイズフィールドのサイズ（バイト）です。
+	chunkSizeSize = 4
 	// waveIDSize は "WAVE" 識別子のサイズ（バイト）です。
 	waveIDSize = 4
-
-	// dataChunkIDSize は "data" チャンクIDのサイズ（バイト）です。
-	dataChunkIDSize = 4
-	// dataChunkSizeSize はデータサイズフィールドのサイズ（バイト）です。
-	dataChunkSizeSize = 4
 )
 
-// WAV ファイルのヘッダー計算やロジックで使用される複合サイズ定数です。
+// WAV ファイルのヘッダー計算で使用される複合サイズ定数です。
 const (
 	// TotalHeaderSize は一般的な WAV ファイルの最小ヘッダーサイズ（44バイト）です。
 	TotalHeaderSize = 44
-	// dataChunkHeaderSize は "data" チャンクヘッダーの合計サイズ（8バイト）です。
-	dataChunkHeaderSize = dataChunkIDSize + dataChunkSizeSize
+	// chunkHeaderSize は、チャンクヘッダー (ID + サイズ) の合計サイズ（8バイト）です。
+	chunkHeaderSize = chunkIDSize + chunkSizeSize
 	// minFormatChunkSize は PCM の "fmt " チャンクのペイロードサイズ（16バイト）です。
 	minFormatChunkSize = 16
 	// wavRiffHeaderSize は RIFF ヘッダーの合計サイズ（12バイト）です。
-	wavRiffHeaderSize = riffChunkIDSize + riffChunkSizeSize + waveIDSize
+	wavRiffHeaderSize = chunkIDSize + chunkSizeSize + waveIDSize
 )
 
-// ファイルのバイナリ操作時に使用されるオフセット定数です。
-const (
-	// riffChunkSizeOffset は、ファイル結合時に RIFF チャンクサイズを更新するために必要な、
-	// RIFF チャンクサイズが書き込まれるオフセット位置（4バイト目）です。
-	riffChunkSizeOffset = riffChunkIDSize
-)
+// riffChunkSizeOffset は、結合時に RIFF チャンクサイズを書き換えるオフセット位置（4バイト目）です。
+const riffChunkSizeOffset = chunkIDSize
 
 type wavChunk struct {
 	id     string
@@ -83,7 +74,7 @@ func validateRiffHeader(wavBytes []byte, index int) error {
 			Details: fmt.Sprintf("WAVファイルサイズが短すぎます (RIFFヘッダー不足: %dバイト)", len(wavBytes)),
 		}
 	}
-	if !bytes.Equal(wavBytes[0:riffChunkIDSize], []byte("RIFF")) || !bytes.Equal(wavBytes[riffChunkIDSize+riffChunkSizeSize:wavRiffHeaderSize], []byte("WAVE")) {
+	if !bytes.Equal(wavBytes[0:chunkIDSize], []byte("RIFF")) || !bytes.Equal(wavBytes[chunkHeaderSize:wavRiffHeaderSize], []byte("WAVE")) {
 		return &ErrInvalidWAVHeader{
 			Index:   index,
 			Details: "RIFF/WAVE識別子が不正です",
@@ -100,14 +91,14 @@ func scanWavChunks(wavBytes []byte, index int) (Format, wavChunk, error) {
 	)
 
 	for offset := wavRiffHeaderSize; offset < len(wavBytes); {
-		if offset+dataChunkHeaderSize > len(wavBytes) {
+		if offset+chunkHeaderSize > len(wavBytes) {
 			break
 		}
 
 		chunk := wavChunk{
-			id:     string(wavBytes[offset : offset+dataChunkIDSize]),
+			id:     string(wavBytes[offset : offset+chunkIDSize]),
 			offset: offset,
-			size:   binary.LittleEndian.Uint32(wavBytes[offset+dataChunkIDSize : offset+dataChunkHeaderSize]),
+			size:   binary.LittleEndian.Uint32(wavBytes[offset+chunkIDSize : offset+chunkHeaderSize]),
 		}
 
 		if chunk.id == "fmt " {
@@ -141,7 +132,7 @@ func scanWavChunks(wavBytes []byte, index int) (Format, wavChunk, error) {
 
 // parseFormatChunk は fmt チャンクから、結合可否の判定に使う値を読み出します。
 func parseFormatChunk(wavBytes []byte, chunk wavChunk, index int) (Format, error) {
-	payloadStart := chunk.offset + dataChunkHeaderSize
+	payloadStart := chunk.offset + chunkHeaderSize
 	// PCM の fmt チャンクは 16 バイト。拡張形式はより長いが、先頭 16 バイトの並びは共通。
 	if uint64(chunk.size) < minFormatChunkSize || payloadStart+minFormatChunkSize > len(wavBytes) {
 		return Format{}, &ErrInvalidWAVHeader{
@@ -160,7 +151,7 @@ func parseFormatChunk(wavBytes []byte, chunk wavChunk, index int) (Format, error
 
 // nextChunkOffset は WAV チャンクのパディングを考慮して次のチャンク位置を返します。
 func nextChunkOffset(offset int, chunkSize uint32) uint64 {
-	nextOffset := uint64(offset) + uint64(dataChunkHeaderSize) + uint64(chunkSize)
+	nextOffset := uint64(offset) + uint64(chunkHeaderSize) + uint64(chunkSize)
 	if chunkSize%2 != 0 {
 		nextOffset++
 	}
@@ -169,7 +160,7 @@ func nextChunkOffset(offset int, chunkSize uint32) uint64 {
 
 // validateDataChunk は data チャンクのサイズを検証します。
 func validateDataChunk(wavBytes []byte, chunk wavChunk, index int) (wavChunk, error) {
-	audioDataStart := chunk.offset + dataChunkHeaderSize
+	audioDataStart := chunk.offset + chunkHeaderSize
 	// int の加算オーバーフローを避けるため、残量との比較は uint64 で行う。
 	remainingBytes := uint64(len(wavBytes) - audioDataStart)
 	if uint64(chunk.size) > remainingBytes {
@@ -208,7 +199,7 @@ func appendMissingChunk(current, next string) string {
 
 // chunkPayload は WAV チャンクに対応するデータ部分を返します。
 func chunkPayload(wavBytes []byte, chunk wavChunk) []byte {
-	audioDataStart := chunk.offset + dataChunkHeaderSize
+	audioDataStart := chunk.offset + chunkHeaderSize
 	audioDataEnd := audioDataStart + int(chunk.size)
 	return wavBytes[audioDataStart:audioDataEnd]
 }
@@ -216,28 +207,24 @@ func chunkPayload(wavBytes []byte, chunk wavChunk) []byte {
 // buildCombinedWav はオーディオパーツのスライスを一括でコピーして WAV ファイルを再構築します。
 func buildCombinedWav(formatHeader []byte, audioParts [][]byte, totalAudioSize int) ([]byte, error) {
 	dataChunkStart := len(formatHeader)
-	dataChunkSizeOffset := dataChunkStart + dataChunkIDSize
-	finalWavHeaderSize := dataChunkStart + dataChunkHeaderSize
+	dataChunkSizeOffset := dataChunkStart + chunkIDSize
+	finalWavHeaderSize := dataChunkStart + chunkHeaderSize
 
 	// RIFFチャンクサイズ = (全ヘッダー + 全データ) - 8
-	fileSize := totalAudioSize + finalWavHeaderSize - (riffChunkIDSize + riffChunkSizeSize)
+	fileSize := totalAudioSize + finalWavHeaderSize - chunkHeaderSize
 
 	if uint64(fileSize) > math.MaxUint32 {
 		return nil, fmt.Errorf("結合後のWAVファイルサイズが4GBを超過しています")
 	}
 
-	// 最終的な出力バッファを一度だけ make
+	// 出力バッファの確保は一度だけ。以降はこの中へ直接書き込む。
 	combinedWav := make([]byte, finalWavHeaderSize+totalAudioSize)
 
-	// ヘッダー情報の書き込み
 	copy(combinedWav, formatHeader)
 	copy(combinedWav[dataChunkStart:], []byte("data"))
-
-	// サイズメタデータの更新
 	binary.LittleEndian.PutUint32(combinedWav[riffChunkSizeOffset:riffChunkSizeOffset+4], uint32(fileSize))
 	binary.LittleEndian.PutUint32(combinedWav[dataChunkSizeOffset:dataChunkSizeOffset+4], uint32(totalAudioSize))
 
-	// 各セクションのデータをループで順番にコピー
 	currentOffset := finalWavHeaderSize
 	for _, part := range audioParts {
 		copy(combinedWav[currentOffset:], part)

@@ -13,14 +13,12 @@ func CombineWavData(wavDataList [][]byte) ([]byte, error) {
 		return nil, &ErrNoAudioData{}
 	}
 
-	// 1. 最初のWAVからフォーマット情報を抽出
 	// extractAudioData のエラーはファイル位置 (#N) を含むため、そのまま返す。
 	first, err := extractAudioData(wavDataList[0], 0)
 	if err != nil {
 		return nil, err
 	}
 
-	// 2. すべてのオーディオデータをスライスに保持（メモリ再確保を防止）
 	extractedAudio := make([][]byte, len(wavDataList))
 	extractedAudio[0] = first.audioData
 	totalAudioSize := len(first.audioData)
@@ -39,7 +37,6 @@ func CombineWavData(wavDataList [][]byte) ([]byte, error) {
 		totalAudioSize += len(current.audioData)
 	}
 
-	// 3. 結合されたデータと最初のフォーマットヘッダーから新しいWAVファイルを構築
 	combinedWavBytes, err := buildCombinedWav(first.formatHeader, extractedAudio, totalAudioSize)
 	if err != nil {
 		return nil, fmt.Errorf("最終的なWAVファイルの構築に失敗しました: %w", err)

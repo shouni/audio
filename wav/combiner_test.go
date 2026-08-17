@@ -9,8 +9,8 @@ import (
 )
 
 func TestCombineWavDataConcatenatesAudioPayloads(t *testing.T) {
-	first := testWAV([]byte{1, 2, 3})
-	second := testWAV([]byte{4, 5})
+	first := buildWAV(defaultSpec([]byte{1, 2, 3}))
+	second := buildWAV(defaultSpec([]byte{4, 5}))
 
 	combined, err := CombineWavData([][]byte{first, second})
 	if err != nil {
@@ -46,22 +46,4 @@ func TestCombineWavDataReturnsErrorOnEmptyInput(t *testing.T) {
 	if _, ok := errors.AsType[*ErrNoAudioData](err); !ok {
 		t.Fatalf("error type = %T, want *ErrNoAudioData", err)
 	}
-}
-
-func testWAV(audio []byte) []byte {
-	header := make([]byte, 44)
-	copy(header[0:], []byte("RIFF"))
-	binary.LittleEndian.PutUint32(header[4:], uint32(36+len(audio)))
-	copy(header[8:], []byte("WAVE"))
-	copy(header[12:], []byte("fmt "))
-	binary.LittleEndian.PutUint32(header[16:], 16)
-	binary.LittleEndian.PutUint16(header[20:], 1)
-	binary.LittleEndian.PutUint16(header[22:], 1)
-	binary.LittleEndian.PutUint32(header[24:], 24000)
-	binary.LittleEndian.PutUint32(header[28:], 48000)
-	binary.LittleEndian.PutUint16(header[32:], 2)
-	binary.LittleEndian.PutUint16(header[34:], 16)
-	copy(header[36:], []byte("data"))
-	binary.LittleEndian.PutUint32(header[40:], uint32(len(audio)))
-	return append(header, audio...)
 }

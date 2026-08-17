@@ -40,6 +40,7 @@ type Option func(*Converter)
 // defaultReadingOverrides は標準で適用する表層形ごとの読み上書きです。
 var defaultReadingOverrides = mustLoadReadingOverridesJSON(defaultReadingOverridesJSON)
 
+// particleReadings は、助詞として使われたときに表記と発音が異なる表層形の読みです。
 var particleReadings = map[string]string{
 	"は": "ワ",
 	"へ": "エ",
