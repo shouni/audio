@@ -335,6 +335,41 @@ func TestDefaultReadingOverrides_FixesMisreadings(t *testing.T) {
 	}
 }
 
+// TestDefaultReadingOverrides_FixesImperatives は、接尾辞や別動詞と同形の命令形が
+// 化けないことを確認します。
+//
+// 「立て」は単独だと接尾辞の ダテ（二本立て等）として解析され、「打て」は記号の
+// 直後で 打つ（ブツ）側の ブテ に化け、「絶て」は名詞の直後で 絶っ＋て（ゼッテ）に
+// 割れます。命令形は歌詞では行頭・単独で置かれることが多く、この化け方は目立ちます。
+func TestDefaultReadingOverrides_FixesImperatives(t *testing.T) {
+	converter, err := NewConverter()
+	if err != nil {
+		t.Fatalf("failed to create converter: %v", err)
+	}
+
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{input: "立て", want: "タテ"},
+		{input: "さあ立て", want: "サアタテ"},
+		{input: "君よ立て", want: "キミヨタテ"},
+		{input: "[Chorus] 打て", want: "[Chorus] ウテ"},
+		{input: "打て…", want: "ウテ…"},
+		// 絶て の上書きで ゼッテ 化けは直る。直前の「今」が名詞連続の解析に
+		// 引きずられて コン と読まれる問題はラティス由来で、上書きでは直せない。
+		{input: "今絶て", want: "コンタテ"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := converter.ConvertToReading(tt.input); got != tt.want {
+				t.Errorf("ConvertToReading(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestDefaultReadingOverrides_KeepsCompoundsIntact は、訓読み用の上書きが同じ漢字を含む
 // 音読みの熟語を壊さないことを確認します。
 //
@@ -374,6 +409,14 @@ func TestDefaultReadingOverrides_KeepsCompoundsIntact(t *testing.T) {
 		{input: "非同期処理", want: "ヒドウキショリ"},
 		// 仄暗い の上書きが、辞書が正しく読める 仄か を巻き込まないこと
 		{input: "仄かな光", want: "ホノカナヒカリ"},
+		// 立て→タテ の上書きが、接尾辞 ダテ の複合語や別読みの熟語を巻き込まないこと
+		{input: "二本立て", want: "ニホンダテ"},
+		{input: "献立", want: "コンダテ"},
+		{input: "旅立て", want: "タビダテ"},
+		{input: "仕立て", want: "シタテ"},
+		{input: "夕立", want: "ユウダチ"},
+		{input: "打ち上げ", want: "ウチアゲ"},
+		{input: "博打", want: "バクチ"},
 	}
 
 	for _, tt := range tests {
@@ -412,10 +455,12 @@ func TestDefaultReadingOverrides_NoRedundantEntries(t *testing.T) {
 	// ラティスの経路が変わり、単独では正しく読める語が割れることがある
 	// （重なる → 重/なる でオモナル）。行頭の改行文脈は行分割で吸収されるため、
 	// ここで確かめるのは同一行の記号直後だけでよい。
+	// "今%s" は名詞が直前に来る文脈。命令形が接尾辞として解釈される誤読
+	// （今絶て → コンゼッテ）はこの形でだけ現れる。
 	contexts := []string{
 		"%s", "%sが好き", "%sを抱いて", "%sの向こう", "君の%s",
 		"遠い%sへ", "%sだけが残る", "静かな%sと", "%sは終わらない",
-		"[Chorus] %s",
+		"[Chorus] %s", "今%s",
 	}
 
 	for surface := range defaultReadingOverrides {
