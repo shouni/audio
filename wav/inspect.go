@@ -2,23 +2,6 @@ package wav
 
 import "time"
 
-// Format は WAV の fmt チャンクから読み取った再生フォーマットです。
-type Format struct {
-	// AudioFormat は音声データの符号化方式です (1 = リニア PCM)。
-	AudioFormat uint16
-	// NumChannels はチャンネル数です (1 = モノラル、2 = ステレオ)。
-	NumChannels uint16
-	// SampleRate は1秒あたりのサンプル数 (Hz) です。
-	SampleRate uint32
-	// BitsPerSample は1サンプルあたりのビット数です。
-	BitsPerSample uint16
-}
-
-// byteRate は1秒あたりのバイト数を返します。
-func (f Format) byteRate() uint64 {
-	return uint64(f.SampleRate) * uint64(f.NumChannels) * uint64(f.BitsPerSample) / 8
-}
-
 // Info は WAV バイナリから読み取ったフォーマットと音声データの概要です。
 type Info struct {
 	// Format は fmt チャンクの内容です。
@@ -31,10 +14,15 @@ type Info struct {
 // フォーマット値から1秒あたりのバイト数が計算できない場合 (0 になる場合) は 0 を返します。
 func (i Info) Duration() time.Duration {
 	rate := i.Format.byteRate()
-	if rate == 0 {
+	if rate == 0 || i.DataSize <= 0 {
 		return 0
 	}
-	return time.Duration(float64(i.DataSize) / float64(rate) * float64(time.Second))
+	// 秒と端数に分けて整数のまま計算する。浮動小数点を経由すると、
+	// サンプル境界ちょうどの長さでも 1ns 単位の誤差が乗ることがある。
+	size := uint64(i.DataSize)
+	seconds := size / rate
+	remainder := size % rate
+	return time.Duration(seconds)*time.Second + time.Duration(remainder*uint64(time.Second)/rate)
 }
 
 // Inspect は WAV バイナリを解析し、フォーマットと音声データの概要を返します。

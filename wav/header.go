@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"math"
+	"strings"
 )
 
 // RIFF 構造の解析に使用するサイズ定数です。
@@ -19,18 +19,25 @@ const (
 
 // WAV ファイルのヘッダー計算で使用される複合サイズ定数です。
 const (
-	// TotalHeaderSize は一般的な WAV ファイルの最小ヘッダーサイズ（44バイト）です。
-	TotalHeaderSize = 44
+	// standardHeaderSize は、拡張チャンクを持たない WAV のヘッダーサイズ（44バイト）です。
+	standardHeaderSize = 44
 	// chunkHeaderSize は、チャンクヘッダー (ID + サイズ) の合計サイズ（8バイト）です。
 	chunkHeaderSize = chunkIDSize + chunkSizeSize
 	// minFormatChunkSize は PCM の "fmt " チャンクのペイロードサイズ（16バイト）です。
 	minFormatChunkSize = 16
+	// extensibleFormatChunkSize は WAVE_FORMAT_EXTENSIBLE の "fmt " チャンクの
+	// ペイロードサイズ（40バイト）です。
+	extensibleFormatChunkSize = 40
 	// wavRiffHeaderSize は RIFF ヘッダーの合計サイズ（12バイト）です。
 	wavRiffHeaderSize = chunkIDSize + chunkSizeSize + waveIDSize
 )
 
 // riffChunkSizeOffset は、結合時に RIFF チャンクサイズを書き換えるオフセット位置（4バイト目）です。
 const riffChunkSizeOffset = chunkIDSize
+
+// extensibleFormatTag は WAVE_FORMAT_EXTENSIBLE を表す AudioFormat の値です。
+// この値のときだけ、実際の符号化方式は fmt チャンク末尾の SubFormat GUID 側にあります。
+const extensibleFormatTag = 0xFFFE
 
 type wavChunk struct {
 	id     string
@@ -111,7 +118,7 @@ func scanWavChunks(wavBytes []byte, index int) (Format, wavChunk, error) {
 		}
 		if chunk.id == "data" {
 			if !fmtChunkFound {
-				return Format{}, wavChunk{}, missingWavChunkError(index, false, true)
+				return Format{}, wavChunk{}, missingChunkError(index, "'fmt '")
 			}
 			dataChunk, err := validateDataChunk(wavBytes, chunk, index)
 			if err != nil {
@@ -120,38 +127,70 @@ func scanWavChunks(wavBytes []byte, index int) (Format, wavChunk, error) {
 			return format, dataChunk, nil
 		}
 
-		nextOffset := nextChunkOffset(offset, chunk.size)
+		nextOffset := nextChunkOffset(uint64(offset), chunk.size)
 		if nextOffset > uint64(len(wavBytes)) {
 			break
 		}
 		offset = int(nextOffset)
 	}
 
-	return Format{}, wavChunk{}, missingWavChunkError(index, fmtChunkFound, false)
+	if fmtChunkFound {
+		return Format{}, wavChunk{}, missingChunkError(index, "'data'")
+	}
+	return Format{}, wavChunk{}, missingChunkError(index, "'fmt '", "'data'")
 }
 
 // parseFormatChunk は fmt チャンクから、結合可否の判定に使う値を読み出します。
 func parseFormatChunk(wavBytes []byte, chunk wavChunk, index int) (Format, error) {
 	payloadStart := chunk.offset + chunkHeaderSize
+	if payloadStart > len(wavBytes) {
+		payloadStart = len(wavBytes)
+	}
+	payloadEnd := min(payloadStart+extensibleFormatChunkSize, len(wavBytes))
+	return parseFormatPayload(wavBytes[payloadStart:payloadEnd], chunk.size, index)
+}
+
+// parseFormatPayload は fmt チャンクのペイロードからフォーマットを読み出します。
+// declaredSize はチャンクヘッダーが宣言しているサイズで、payload はその先頭部分
+// （最大 extensibleFormatChunkSize バイト）です。
+//
+// WAVE_FORMAT_EXTENSIBLE (AudioFormat = 0xFFFE) では実際の符号化方式もチャンネル配置も
+// 先頭 16 バイトには入っていないため、拡張部（チャンネルマスクとサブフォーマット GUID）
+// まで読み出します。ここを読まないと、リニア PCM と IEEE float が「どちらも 0xFFFE」
+// として一致扱いになります。
+func parseFormatPayload(payload []byte, declaredSize uint32, index int) (Format, error) {
 	// PCM の fmt チャンクは 16 バイト。拡張形式はより長いが、先頭 16 バイトの並びは共通。
-	if uint64(chunk.size) < minFormatChunkSize || payloadStart+minFormatChunkSize > len(wavBytes) {
+	if uint64(declaredSize) < minFormatChunkSize || len(payload) < minFormatChunkSize {
 		return Format{}, &ErrInvalidWAVHeader{
 			Index:   index,
-			Details: fmt.Sprintf("fmtチャンクが短すぎます (%dバイト、最低%dバイト必要)", chunk.size, minFormatChunkSize),
+			Details: fmt.Sprintf("fmtチャンクが短すぎます (%dバイト、最低%dバイト必要)", declaredSize, minFormatChunkSize),
 		}
 	}
 
-	return Format{
-		AudioFormat:   binary.LittleEndian.Uint16(wavBytes[payloadStart:]),
-		NumChannels:   binary.LittleEndian.Uint16(wavBytes[payloadStart+2:]),
-		SampleRate:    binary.LittleEndian.Uint32(wavBytes[payloadStart+4:]),
-		BitsPerSample: binary.LittleEndian.Uint16(wavBytes[payloadStart+14:]),
-	}, nil
+	format := Format{
+		AudioFormat:   binary.LittleEndian.Uint16(payload[0:]),
+		NumChannels:   binary.LittleEndian.Uint16(payload[2:]),
+		SampleRate:    binary.LittleEndian.Uint32(payload[4:]),
+		BitsPerSample: binary.LittleEndian.Uint16(payload[14:]),
+	}
+	if format.AudioFormat != extensibleFormatTag {
+		return format, nil
+	}
+
+	if uint64(declaredSize) < extensibleFormatChunkSize || len(payload) < extensibleFormatChunkSize {
+		return Format{}, &ErrInvalidWAVHeader{
+			Index:   index,
+			Details: fmt.Sprintf("拡張形式(WAVE_FORMAT_EXTENSIBLE)のfmtチャンクが短すぎます (%dバイト、最低%dバイト必要)", declaredSize, extensibleFormatChunkSize),
+		}
+	}
+	format.ChannelMask = binary.LittleEndian.Uint32(payload[20:])
+	copy(format.SubFormat[:], payload[24:extensibleFormatChunkSize])
+	return format, nil
 }
 
 // nextChunkOffset は WAV チャンクのパディングを考慮して次のチャンク位置を返します。
-func nextChunkOffset(offset int, chunkSize uint32) uint64 {
-	nextOffset := uint64(offset) + uint64(chunkHeaderSize) + uint64(chunkSize)
+func nextChunkOffset(offset uint64, chunkSize uint32) uint64 {
+	nextOffset := offset + uint64(chunkHeaderSize) + uint64(chunkSize)
 	if chunkSize%2 != 0 {
 		nextOffset++
 	}
@@ -173,28 +212,12 @@ func validateDataChunk(wavBytes []byte, chunk wavChunk, index int) (wavChunk, er
 	return chunk, nil
 }
 
-// missingWavChunkError は不足している必須チャンクを示すエラーを作成します。
-func missingWavChunkError(index int, fmtChunkFound, dataChunkFound bool) error {
-	missingChunk := ""
-	if !fmtChunkFound {
-		missingChunk = "'fmt '"
-	}
-	if !dataChunkFound {
-		missingChunk = appendMissingChunk(missingChunk, "'data'")
-	}
-
+// missingChunkError は不足している必須チャンクを示すエラーを作成します。
+func missingChunkError(index int, missing ...string) error {
 	return &ErrInvalidWAVHeader{
 		Index:   index,
-		Details: fmt.Sprintf("WAVファイル内に必要なチャンク (%s) が見つかりませんでした", missingChunk),
+		Details: fmt.Sprintf("WAVファイル内に必要なチャンク (%s) が見つかりませんでした", strings.Join(missing, "と")),
 	}
-}
-
-// appendMissingChunk は不足チャンク名をエラーメッセージ用に連結します。
-func appendMissingChunk(current, next string) string {
-	if current == "" {
-		return next
-	}
-	return current + " and " + next
 }
 
 // chunkPayload は WAV チャンクに対応するデータ部分を返します。
@@ -202,34 +225,4 @@ func chunkPayload(wavBytes []byte, chunk wavChunk) []byte {
 	audioDataStart := chunk.offset + chunkHeaderSize
 	audioDataEnd := audioDataStart + int(chunk.size)
 	return wavBytes[audioDataStart:audioDataEnd]
-}
-
-// buildCombinedWav はオーディオパーツのスライスを一括でコピーして WAV ファイルを再構築します。
-func buildCombinedWav(formatHeader []byte, audioParts [][]byte, totalAudioSize int) ([]byte, error) {
-	dataChunkStart := len(formatHeader)
-	dataChunkSizeOffset := dataChunkStart + chunkIDSize
-	finalWavHeaderSize := dataChunkStart + chunkHeaderSize
-
-	// RIFFチャンクサイズ = (全ヘッダー + 全データ) - 8
-	fileSize := totalAudioSize + finalWavHeaderSize - chunkHeaderSize
-
-	if uint64(fileSize) > math.MaxUint32 {
-		return nil, fmt.Errorf("結合後のWAVファイルサイズが4GBを超過しています")
-	}
-
-	// 出力バッファの確保は一度だけ。以降はこの中へ直接書き込む。
-	combinedWav := make([]byte, finalWavHeaderSize+totalAudioSize)
-
-	copy(combinedWav, formatHeader)
-	copy(combinedWav[dataChunkStart:], []byte("data"))
-	binary.LittleEndian.PutUint32(combinedWav[riffChunkSizeOffset:riffChunkSizeOffset+4], uint32(fileSize))
-	binary.LittleEndian.PutUint32(combinedWav[dataChunkSizeOffset:dataChunkSizeOffset+4], uint32(totalAudioSize))
-
-	currentOffset := finalWavHeaderSize
-	for _, part := range audioParts {
-		copy(combinedWav[currentOffset:], part)
-		currentOffset += len(part)
-	}
-
-	return combinedWav, nil
 }
