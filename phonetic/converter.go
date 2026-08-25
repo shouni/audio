@@ -32,6 +32,10 @@ type Converter struct {
 	// 全キーの走査ではなく先頭文字が一致するキーだけに絞るための索引です。
 	overrideKeysByFirstRune map[rune][]string
 	phraseSpacing           bool
+	numberReading           bool
+	// optionErr は Option の適用中に起きたエラーです。Option は値を返さないため、
+	// ここに預けて NewConverter がまとめて返します。
+	optionErr error
 }
 
 // Option は Converter の生成時に変換動作を調整する関数です。
@@ -51,6 +55,38 @@ var particleReadings = map[string]string{
 func WithPhraseSpacing() Option {
 	return func(c *Converter) {
 		c.phraseSpacing = true
+	}
+}
+
+// WithNumberReading は算用数字を日本語の読みへ変換する Option を返します。
+//
+// 形態素解析器の辞書は算用数字に読みを持たないため、既定では "2026年8月" が
+// "2026ネン8ツキ" になります。この Option を付けると "ニセンニジュウロクネンハチガツ"
+// のように、数の読みと助数詞の音の変化（一回→イッカイ、三本→サンボン）まで当てます。
+//
+// 数の直後にない助数詞や、辞書が正しく読める漢数字（"十二月"）には影響しません。
+// 先頭が 0 の並び（"007"）と小数点以下は、桁として読まずに 1 文字ずつ読みます。
+func WithNumberReading() Option {
+	return func(c *Converter) {
+		c.numberReading = true
+	}
+}
+
+// WithReadingOverridesJSON は JSON から読みの上書きを読み込んで追加する Option を返します。
+//
+// data は表層形をキー、読みを値にしたオブジェクトです（同梱の
+// reading_overrides.json と同じ形式）。プロジェクト固有の辞書を Go のコードに
+// 書き写さずに読み込むために使います。
+//
+// JSON が壊れている場合や空のキー・値を含む場合は、NewConverter がエラーを返します。
+func WithReadingOverridesJSON(data []byte) Option {
+	return func(c *Converter) {
+		overrides, err := loadReadingOverridesJSON(data)
+		if err != nil {
+			c.optionErr = err
+			return
+		}
+		WithReadingOverrides(overrides)(c)
 	}
 }
 
@@ -96,6 +132,9 @@ func NewConverter(options ...Option) (*Converter, error) {
 	c.rebuildOverrideKeys()
 	for _, option := range options {
 		option(c)
+		if c.optionErr != nil {
+			return nil, c.optionErr
+		}
 	}
 	return c, nil
 }
@@ -106,16 +145,32 @@ func NewConverter(options ...Option) (*Converter, error) {
 // 行頭の語が直前の記号・未知語（英語タグ等）の文脈に引きずられて分割が変わるためです
 // （例: "[Chorus]\n重なる" を一括で解析すると 重なる が 重/なる に割れてオモナルになる）。
 // 歌詞では行が文の単位なので、行単位の解析が品詞判定としても正しくなります。
+//
+// 改行文字は入力のまま（CRLF なら CRLF のまま）出力へ引き継ぎます。
 func (c *Converter) ConvertToReading(input string) string {
-	if !strings.Contains(input, "\n") {
-		return c.convertLine(input)
+	var sb strings.Builder
+	sb.Grow(len(input) * 2)
+	for line := range strings.Lines(input) {
+		body, terminator := splitLineTerminator(line)
+		sb.WriteString(c.convertLine(body))
+		sb.WriteString(terminator)
 	}
+	return sb.String()
+}
 
-	lines := strings.Split(input, "\n")
-	for i, line := range lines {
-		lines[i] = c.convertLine(line)
+// splitLineTerminator は行を本文と改行文字に分けます。
+//
+// CRLF の \r を本文に残したまま解析すると、トークナイザが未知語として拾って読みに
+// 混ざり、文節スペースの末尾トリムも \r に阻まれて効かなくなります。
+func splitLineTerminator(line string) (body, terminator string) {
+	body, ok := strings.CutSuffix(line, "\n")
+	if !ok {
+		return line, ""
 	}
-	return strings.Join(lines, "\n")
+	if withoutCR, ok := strings.CutSuffix(body, "\r"); ok {
+		return withoutCR, "\r\n"
+	}
+	return body, "\n"
 }
 
 // convertLine は1行分のテキストをカタカナの読みに変換します。
@@ -143,6 +198,14 @@ func (c *Converter) convertLine(input string) string {
 
 		surface, reading, ok := c.matchOverrideAt(input, token.Position, boundaries)
 		if !ok {
+			// 読み上書きの次に数を見る。上書きを先に見るのは、利用者が明示した読みが
+			// 常に勝つべきだからで、数の読みは辞書と同じく既定の解釈にすぎない。
+			if numberReading, next, matched := c.matchNumberAt(input, tokens, i, boundaries); matched {
+				sb.WriteString(numberReading)
+				c.writePhraseBreak(&sb, tokens[next-1].Features())
+				i = next
+				continue
+			}
 			features := token.Features()
 			sb.WriteString(tokenReading(token, features))
 			c.writePhraseBreak(&sb, features)
