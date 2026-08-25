@@ -635,3 +635,114 @@ func BenchmarkConverter_ConvertToReading(b *testing.B) {
 		converter.ConvertToReading(input)
 	}
 }
+
+// TestConverter_ConvertToReading_PreservesLineTerminators は、改行文字が入力のまま
+// 引き継がれ、CRLF の \r が読みに混ざらないことを確認します。
+//
+// \r を行の一部として解析すると未知語として読みへ漏れ、文節スペースの末尾トリムも
+// \r に阻まれて「ソラガ \r\n」のように空白が残ります。
+func TestConverter_ConvertToReading_PreservesLineTerminators(t *testing.T) {
+	tests := []struct {
+		name    string
+		options []Option
+		input   string
+		want    string
+	}{
+		{
+			name:  "LF",
+			input: "空が\n青い",
+			want:  "ソラガ\nアオイ",
+		},
+		{
+			name:  "CRLF",
+			input: "空が\r\n青い",
+			want:  "ソラガ\r\nアオイ",
+		},
+		{
+			name:    "CRLFと文節スペース",
+			options: []Option{WithPhraseSpacing()},
+			input:   "空が\r\n青い",
+			want:    "ソラガ\r\nアオイ",
+		},
+		{
+			name:  "末尾の改行",
+			input: "空が青い\n",
+			want:  "ソラガアオイ\n",
+		},
+		{
+			name:  "空行",
+			input: "空\n\n青",
+			want:  "ソラ\n\nアオ",
+		},
+		{
+			name:  "改行なし",
+			input: "空が青い",
+			want:  "ソラガアオイ",
+		},
+		{
+			name:  "空文字",
+			input: "",
+			want:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			converter, err := NewConverter(tt.options...)
+			if err != nil {
+				t.Fatalf("NewConverter() error = %v", err)
+			}
+			if got := converter.ConvertToReading(tt.input); got != tt.want {
+				t.Errorf("ConvertToReading(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConverter_WithReadingOverridesJSON(t *testing.T) {
+	t.Run("JSONから読み上書きを追加できること", func(t *testing.T) {
+		converter, err := NewConverter(WithReadingOverridesJSON([]byte(`{"閃光": "センコウ"}`)))
+		if err != nil {
+			t.Fatalf("NewConverter() error = %v", err)
+		}
+		if got, want := converter.ConvertToReading("私は閃光"), "ワタシワセンコウ"; got != want {
+			t.Errorf("ConvertToReading() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("標準の上書きと併用できること", func(t *testing.T) {
+		converter, err := NewConverter(WithReadingOverridesJSON([]byte(`{"閃光": "センコウ"}`)))
+		if err != nil {
+			t.Fatalf("NewConverter() error = %v", err)
+		}
+		if got, want := converter.ConvertToReading("こんにちは"), "コンニチワ"; got != want {
+			t.Errorf("ConvertToReading() = %q, want %q", got, want)
+		}
+	})
+
+	// Option は値を返せないため、エラーは NewConverter が返す。ここで黙って無視すると
+	// 辞書の読み込み失敗に気付かないまま、上書きの効かない Converter が出来上がる。
+	t.Run("壊れたJSONはNewConverterがエラーにすること", func(t *testing.T) {
+		tests := []struct {
+			name string
+			data string
+		}{
+			{"JSONとして不正", `{`},
+			{"キーが空", `{"": "センコウ"}`},
+			{"値が空", `{"閃光": ""}`},
+			{"値が文字列でない", `{"閃光": 1}`},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				converter, err := NewConverter(WithReadingOverridesJSON([]byte(tt.data)))
+				if err == nil {
+					t.Fatal("NewConverter() error = nil, want error")
+				}
+				if converter != nil {
+					t.Errorf("NewConverter() = %v, want nil", converter)
+				}
+			})
+		}
+	})
+}

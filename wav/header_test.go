@@ -23,7 +23,7 @@ func defaultSpec(audio []byte) wavSpec {
 // buildWAV は spec のとおりの 44 バイトヘッダーを持つ WAV を組み立てます。
 func buildWAV(spec wavSpec) []byte {
 	blockAlign := spec.numChannels * spec.bitsPerSample / 8
-	header := make([]byte, TotalHeaderSize)
+	header := make([]byte, standardHeaderSize)
 	copy(header[0:], "RIFF")
 	binary.LittleEndian.PutUint32(header[4:], uint32(36+len(spec.audio)))
 	copy(header[8:], "WAVE")
@@ -110,7 +110,7 @@ func TestCombineWavDataAcceptsIdenticalFormat(t *testing.T) {
 	}
 
 	wantAudio := []byte{1, 2, 3, 4, 5, 6, 7, 8}
-	gotAudio := combined[TotalHeaderSize:]
+	gotAudio := combined[standardHeaderSize:]
 	if !bytes.Equal(gotAudio, wantAudio) {
 		t.Errorf("audio payload = %v, want %v", gotAudio, wantAudio)
 	}
