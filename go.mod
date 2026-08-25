@@ -1,6 +1,6 @@
 module github.com/shouni/audio
 
-go 1.26
+go 1.27
 
 require (
 	github.com/ikawaha/kagome-dict/ipa v1.2.6
