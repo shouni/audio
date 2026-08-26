@@ -1,3 +1,8 @@
+# 実体は shouni/workflows が持つ。ジョブの構成・govulncheck の起動方法・
+# check-latest を付ける理由は、そちらの README.md「設計の判断」にある。
+#
+# @v1 は張り替えられる移動タグ。Dependabot はジョブレベルの uses: を更新しないため
+# （実測。詳細は workflows の README）、不変タグで固定しても自動では上がらない。
 name: CI
 
 on:
@@ -14,56 +19,10 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: Build & Test
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Build
-        run: go build ./...
-
-      - name: Vet
-        run: go vet ./...
-
-      - name: Gofmt check
-        run: test -z "$(gofmt -l .)"
-
-      # -shuffle=on はテスト間の暗黙の実行順序依存を検出します。
-      - name: Test (with race detector)
-        run: go test -shuffle=on -race ./...
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.13.1
-
-  vulncheck:
-    name: govulncheck
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: golang/govulncheck-action@v1
-        with:
-          go-version-file: go.mod
-          repo-checkout: false
+  ci:
+    uses: shouni/workflows/.github/workflows/go-ci.yml@v1
+    with:
+      # wav は外から与えられたバイト列を解釈するため、探索を毎回回す。
+      # 3 本 × 20s で約 1 分。落ちたら再現用シードを wav/testdata/fuzz/ に
+      # コミットして回帰テストにする。
+      fuzz-targets: "./wav#FuzzExtractAudioData ./wav#FuzzCombineToMatchesCombineWavData ./wav#FuzzCombineToDoesNotPanic"
