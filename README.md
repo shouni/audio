@@ -1,12 +1,14 @@
 # 🎼 audio
 
 [![CI](https://github.com/shouni/audio/actions/workflows/ci.yml/badge.svg)](https://github.com/shouni/audio/actions/workflows/ci.yml)
-[![Language](https://img.shields.io/badge/Language-Go-blue)](https://golang.org/)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/shouni/audio)](https://golang.org/)
+[![Status](https://img.shields.io/badge/Status-Active-brightgreen)](#)
+[![Language](https://img.shields.io/badge/Language-Go-blue)](https://go.dev/)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/shouni/audio)](https://go.dev/)
 [![GitHub tag (latest by date)](https://img.shields.io/github/v/tag/shouni/audio)](https://github.com/shouni/audio/tags)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Go Reference](https://pkg.go.dev/badge/github.com/shouni/audio.svg)](https://pkg.go.dev/github.com/shouni/audio)
-[![Status](https://img.shields.io/badge/Status-Active-brightgreen)](#)
+
+## 🚀 概要 (About) - デコードせずに繋ぐ WAV と、TTS が読み違えない読み
 
 **`audio`** は、Go 言語で音響バイナリを低レイヤーかつ安全に操作し、音声合成（TTS）や生成系 AI のワークフローを最適化するためのユーティリティ・キットです。
 
