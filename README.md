@@ -14,7 +14,7 @@
 
 バイナリレベルでの高品質な WAV 結合と、形態素解析に基づく高精度なテキスト前処理を組み合わせることで、次世代の音声生成パイプラインを支えます。
 
-## ✨ Core Features
+## ✨ 提供機能 (Features)
 
 *   **Lossless Binary Merging**: WAV セクションをデコードなしでバイナリレベルで直接結合。再エンコードによる世代損失（音質劣化）をゼロに抑えた長尺構成を実現。
 *   **Phonetic Text Processing**: 日本語の形態素解析に基づき、音声合成エンジンが解釈しやすい読み（カタカナ）を生成。助詞の歌唱用補正と、同梱 JSON 辞書による表層形ごとの読み補正を標準装備。
@@ -25,13 +25,9 @@
 *   **Memory Efficient**: 最終的なバッファサイズを事前に計算し、最小限のアロケーションで高速に処理。
 *   **Production Ready**: フォーマット不一致の検出（WAVE_FORMAT_EXTENSIBLE のサブフォーマット GUID まで比較）、4GB 超過チェック、不正なヘッダーに対する厳密なバリデーションを標準装備。
 
-## 📦 Installation
+## 🚦 使い方 (Usage)
 
-```bash
-go get github.com/shouni/audio
-```
-
-## 🚀 Usage
+`go get github.com/shouni/audio` で入れます。
 
 ### 1. 日本語の「読み」変換 (Phonetic Conversion)
 
@@ -220,7 +216,7 @@ fmt.Printf("%dHz %dch %dbit, %v\n",
 // 例: 24000Hz 1ch 16bit, 3.2s
 ```
 
-## 🏗 Project Structure
+## 📦 パッケージ構成 (Package Structure)
 
 ```text
 audio/
@@ -240,7 +236,7 @@ audio/
 └── README.md
 ```
 
-## 🧬 Why `audio`?
+## 🧬 波形に触れない理由 (Why this scope)
 
 一般的な音声ライブラリは、波形を `float64` などの配列として扱いますが、大規模な生成系 AI ワークフローにおいては、以下の2点が重要になります。
 
@@ -249,6 +245,6 @@ audio/
 
 `audio` は、波形そのものに触れるのではなく、テキスト解析とバイナリ再構築という「前処理と後処理」に特化することで、CPU 負荷を抑えつつマスタークオリティの表現力を維持します。
 
-## 📜 License
+## 📜 ライセンス (License)
 
 This project is licensed under the [MIT License](https://opensource.org/licenses/MIT).
