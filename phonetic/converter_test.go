@@ -298,6 +298,11 @@ func TestDefaultReadingOverrides_FixesMisreadings(t *testing.T) {
 		{input: "馬が奔る", want: "ウマガハシル"},
 		{input: "守りを固める", want: "マモリオカタメル"},
 		{input: "種を宿す", want: "タネオヤドス"},
+		// 辞書は「割る」単独でも「ワレル」を返す（自動詞の読みに引きずられる）。
+		// 実測（`music-20260904-180324-15a54300f4a5`）ではそのまま「割れる」と歌われた。
+		{input: "高架の下を割る", want: "コウカノシタオワル"},
+		// 単独の「露」は「ロ」。複合語（朝露・露出）は正しいので、単独形だけを上書きする。
+		{input: "搾った露は", want: "シボッタツユワ"},
 		{input: "電球が瞬いている", want: "デンキュウガマタタイテイル"},
 		{input: "水面が揺蕩う", want: "スイメンガタユタウ"},
 		{input: "彷徨いを続ける", want: "サマヨイオツヅケル"},
@@ -398,6 +403,12 @@ func TestDefaultReadingOverrides_KeepsCompoundsIntact(t *testing.T) {
 		{input: "奔流に飲まれ", want: "ホンリュウニノマレ"},
 		{input: "天空の城", want: "テンクウノシロ"},
 		{input: "お守りを買う", want: "オマモリオカウ"},
+		// 「露」「割る」の上書きが複合語と活用形に及ばないこと。
+		{input: "露出", want: "ロシュツ"},
+		{input: "朝露", want: "アサツユ"},
+		{input: "夜露に濡れる", want: "ヨツユニヌレル"},
+		{input: "割れる", want: "ワレル"},
+		{input: "割った", want: "ワッタ"},
 		{input: "国境を守り抜く", want: "コッキョウオマモリヌク"},
 		{input: "種を宿した苗", want: "タネオヤドシタナエ"},
 		// 上書きの照合はトークンの開始位置からしか行わない。「非同期」は1トークンなので
