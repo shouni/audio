@@ -8,7 +8,6 @@ import (
 	"maps"
 	"slices"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/ikawaha/kagome-dict/ipa"
 	"github.com/ikawaha/kagome/v2/tokenizer"
@@ -27,12 +26,10 @@ var defaultReadingOverridesJSON []byte
 type Converter struct {
 	t                *tokenizer.Tokenizer
 	readingOverrides map[string]string
-	// overrideKeysByFirstRune は、読み上書きのキーを先頭ルーンごとにまとめ、
-	// 各グループ内を最長一致用に長い順で保持します。トークンごとの照合を
-	// 全キーの走査ではなく先頭文字が一致するキーだけに絞るための索引です。
-	overrideKeysByFirstRune map[rune][]string
-	phraseSpacing           bool
-	numberReading           bool
+	// overrideIndex は readingOverrides のキーを最長一致で引くための索引です。
+	overrideIndex prefixIndex
+	phraseSpacing bool
+	numberReading bool
 	// optionErr は Option の適用中に起きたエラーです。Option は値を返さないため、
 	// ここに預けて NewConverter がまとめて返します。
 	optionErr error
@@ -64,7 +61,8 @@ func WithPhraseSpacing() Option {
 // "2026ネン8ツキ" になります。この Option を付けると "ニセンニジュウロクネンハチガツ"
 // のように、数の読みと助数詞の音の変化（一回→イッカイ、三本→サンボン）まで当てます。
 //
-// 数の直後にない助数詞や、辞書が正しく読める漢数字（"十二月"）には影響しません。
+// 漢数字は辞書が単独では読めるので、助数詞が続いて音の変化が要るときだけ読みます
+// （"三本" → サンボン、"二人" → フタリ）。数の直後にない助数詞には影響しません。
 // 先頭が 0 の並び（"007"）と小数点以下は、桁として読まずに 1 文字ずつ読みます。
 func WithNumberReading() Option {
 	return func(c *Converter) {
@@ -196,24 +194,24 @@ func (c *Converter) convertLine(input string) string {
 	for i := 0; i < len(tokens); {
 		token := tokens[i]
 
-		surface, reading, ok := c.matchOverrideAt(input, token.Position, boundaries)
+		surface, ok := c.overrideIndex.match(input, token.Position, boundaries)
 		if !ok {
 			// 読み上書きの次に数を見る。上書きを先に見るのは、利用者が明示した読みが
 			// 常に勝つべきだからで、数の読みは辞書と同じく既定の解釈にすぎない。
 			if numberReading, next, matched := c.matchNumberAt(input, tokens, i, boundaries); matched {
 				sb.WriteString(numberReading)
-				c.writePhraseBreak(&sb, tokens[next-1].Features())
+				c.writePhraseBreak(&sb, tokens[next-1].POS())
 				i = next
 				continue
 			}
-			features := token.Features()
-			sb.WriteString(tokenReading(token, features))
-			c.writePhraseBreak(&sb, features)
+			pos := token.POS()
+			sb.WriteString(tokenReading(token, pos))
+			c.writePhraseBreak(&sb, pos)
 			i++
 			continue
 		}
 
-		sb.WriteString(reading)
+		sb.WriteString(c.readingOverrides[surface])
 		// 上書きが覆ったトークンをまとめて読み飛ばし、文節スペースは末尾のトークンで判定する。
 		end := token.Position + len(surface)
 		last := i
@@ -221,7 +219,7 @@ func (c *Converter) convertLine(input string) string {
 			last = i
 			i++
 		}
-		c.writePhraseBreak(&sb, tokens[last].Features())
+		c.writePhraseBreak(&sb, tokens[last].POS())
 	}
 
 	result := sb.String()
@@ -232,8 +230,8 @@ func (c *Converter) convertLine(input string) string {
 }
 
 // writePhraseBreak は、文節境界のトークン直後にスペースを書き込みます。
-func (c *Converter) writePhraseBreak(sb *strings.Builder, features []string) {
-	if c.phraseSpacing && isPhraseBreak(features) {
+func (c *Converter) writePhraseBreak(sb *strings.Builder, pos []string) {
+	if c.phraseSpacing && isPhraseBreak(pos) {
 		sb.WriteByte(' ')
 	}
 }
@@ -248,36 +246,9 @@ func tokenBoundaries(input string, tokens []tokenizer.Token) map[int]struct{} {
 	return boundaries
 }
 
-// matchOverrideAt は、start から始まり形態素境界で終わる最長の読み上書きを返します。
-func (c *Converter) matchOverrideAt(input string, start int, boundaries map[int]struct{}) (string, string, bool) {
-	rest := input[start:]
-	first, _ := utf8.DecodeRuneInString(rest)
-	for _, surface := range c.overrideKeysByFirstRune[first] {
-		if !strings.HasPrefix(rest, surface) {
-			continue
-		}
-		if _, ok := boundaries[start+len(surface)]; !ok {
-			continue
-		}
-		return surface, c.readingOverrides[surface], true
-	}
-	return "", "", false
-}
-
-// rebuildOverrideKeys は読み上書きのキーを先頭ルーンごとの索引に組み直します。
-// 各グループは最長一致用に長い順で保持します。
+// rebuildOverrideKeys は読み上書きのキーから索引を組み直します。
 func (c *Converter) rebuildOverrideKeys() {
-	keys := slices.Collect(maps.Keys(c.readingOverrides))
-	slices.SortFunc(keys, func(a, b string) int {
-		return len(b) - len(a)
-	})
-
-	buckets := make(map[rune][]string, len(keys))
-	for _, key := range keys {
-		first, _ := utf8.DecodeRuneInString(key)
-		buckets[first] = append(buckets[first], key)
-	}
-	c.overrideKeysByFirstRune = buckets
+	c.overrideIndex = newPrefixIndex(slices.Collect(maps.Keys(c.readingOverrides)))
 }
 
 // cloneReadingOverrides は読み上書きのマップを複製します。
@@ -317,24 +288,22 @@ func validReadingOverride(surface, reading string) bool {
 }
 
 // tokenReading は1トークンの辞書読みを返し、助詞の発音を補正します。
-func tokenReading(token tokenizer.Token, features []string) string {
-	if corrected, ok := particleReading(token, features); ok {
+// pos はそのトークンの品詞階層（token.POS()）です。
+func tokenReading(token tokenizer.Token, pos []string) string {
+	if corrected, ok := particleReading(token, pos); ok {
 		return corrected
 	}
-	return dictionaryReading(token, features)
+	return dictionaryReading(token)
 }
 
 // dictionaryReading は辞書の読みを返します。辞書に読みがない語（未知語や記号）は
 // 表層形で代用しますが、出力の契約はカタカナなので、ひらがなだけはカタカナへ正規化します。
-func dictionaryReading(token tokenizer.Token, features []string) string {
-	const (
-		readingIndex = 7
-	)
-
-	if len(features) <= readingIndex || features[readingIndex] == "*" {
+func dictionaryReading(token tokenizer.Token) string {
+	reading, ok := token.Reading()
+	if !ok || reading == "*" {
 		return hiraganaToKatakana(token.Surface)
 	}
-	return features[readingIndex]
+	return reading
 }
 
 // hiraganaToKatakana は文字列中のひらがなを対応するカタカナに写します。
@@ -360,18 +329,14 @@ func isConvertibleHiragana(r rune) bool {
 	return (r >= 'ぁ' && r <= 'ゖ') || r == 'ゝ' || r == 'ゞ'
 }
 
-func isPhraseBreak(features []string) bool {
-	if len(features) == 0 {
-		return false
-	}
-	pos := features[0]
-	return pos == "助詞" || pos == "助動詞"
+// isPhraseBreak は、品詞階層の先頭（大分類）が文節の切れ目になる品詞かを判定します。
+func isPhraseBreak(pos []string) bool {
+	return len(pos) > 0 && (pos[0] == "助詞" || pos[0] == "助動詞")
 }
 
-func particleReading(token tokenizer.Token, features []string) (string, bool) {
-	const posIndex = 0
-
-	if len(features) <= posIndex || features[posIndex] != "助詞" {
+// particleReading は、助詞として使われた「は」「へ」「を」の発音を返します。
+func particleReading(token tokenizer.Token, pos []string) (string, bool) {
+	if len(pos) == 0 || pos[0] != "助詞" {
 		return "", false
 	}
 

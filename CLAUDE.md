@@ -31,23 +31,23 @@ CI (`.github/workflows/ci.yml`) is a thin caller of the shared `shouni/workflows
 
 ## Design decisions
 
-Per-function rationale lives in the doc comments (`wav/combiner.go`, `wav/stream.go`, `phonetic/converter.go` carry the detail). This section covers only what a single file cannot say from inside.
+Per-function rationale lives in the doc comments (`wav/header.go`, `wav/combiner.go`, `wav/stream.go`, `phonetic/converter.go` carry the detail). This section covers only what a single file cannot say from inside.
 
 ### Combining does not decode, so formats must match
 
-`data` chunk payloads are concatenated as bytes and the output header is the **first** file's `fmt` chunk, reused verbatim. That is what makes the operation lossless — there is no re-encode and therefore no generation loss — and it is also why `verifySameFormat` has to reject any mismatch in format tag, channel count, sample rate, bit depth, channel mask, or `WAVE_FORMAT_EXTENSIBLE` sub-format GUID. Without that check a 48kHz stereo part would be played back under a 24kHz mono header: wrong speed, wrong pitch, wrong channel assignment, and no error. `0xFFFE` in the format tag says nothing on its own, hence the comparison down to the GUID.
+`data` chunk payloads are concatenated as bytes and the output header is the **first** file's `fmt` chunk, reused verbatim. The only thing rewritten in the carried header besides the RIFF size is a `fact` chunk's sample count (`updateFactChunk`), which would otherwise keep describing the first file's length. That is what makes the operation lossless — there is no re-encode and therefore no generation loss — and it is also why `verifySameFormat` has to reject any mismatch in format tag, channel count, sample rate, bit depth, channel mask, or `WAVE_FORMAT_EXTENSIBLE` sub-format GUID. Without that check a 48kHz stereo part would be played back under a 24kHz mono header: wrong speed, wrong pitch, wrong channel assignment, and no error. `0xFFFE` in the format tag says nothing on its own, hence the comparison down to the GUID.
 
 Callers wanting to mix formats must resample first. Do not "fix" a mismatch by relaxing the comparison.
 
 ### The two combine paths must stay indistinguishable
 
-`CombineWavData` (bytes in, bytes out) and `CombineTo` (`io.ReadSeeker` → `io.Writer`) differ only in memory use: the streaming path's footprint is independent of the audio's length and of how many parts there are. Their validation, their errors, and their output bytes are required to be identical, and `FuzzCombineToMatchesCombineWavData` pins exactly that — if one path accepts an input the other rejects, the result would depend on which API a caller happened to pick.
+`CombineWavData` (bytes in, bytes out) and `CombineTo` (`io.ReadSeeker` → `io.Writer`) differ only in memory use: the streaming path's footprint is independent of the audio's length and of how many parts there are. Their validation, their errors, and their output bytes are required to be identical, and `FuzzCombineToMatchesCombineWavData` pins exactly that — if one path accepts an input the other rejects, the result would depend on which API a caller happened to pick. Both paths scan through the same `scanWAV` over a `chunkSource` (bytes or `io.ReadSeeker`), so a divergence can only be introduced after scanning. `chunkSource` is a struct rather than an interface on purpose: an interface method call makes its arguments escape, and `Inspect` is meant to run without allocating.
 
 `CombineTo` takes `io.ReadSeeker` rather than `io.Reader` because the RIFF and `data` chunk sizes go at the front of the output and are not known until everything has been measured, so the inputs are scanned twice. `maxCarriedHeaderSize` (1MiB) caps the header carried over from the first file, so an enormous metadata chunk cannot quietly reinstate the memory cost the streaming path exists to avoid.
 
 ### Fix the reading first, then hand it to the engine
 
-The morphological analyser is the base, not the authority. Proper nouns and coinages are read inconsistently by the dictionary, so the split is: **pin what can be pinned in a dictionary, and leave the rest to the analyser.** The embedded `phonetic/reading_overrides.json` (plus `WithReadingOverrides` / `WithReadingOverridesJSON`) holds the pinned entries; `WithNumberReading` is the same idea for Arabic numerals, whose readings the IPA dictionary does not carry at all.
+The morphological analyser is the base, not the authority. Proper nouns and coinages are read inconsistently by the dictionary, so the split is: **pin what can be pinned in a dictionary, and leave the rest to the analyser.** The embedded `phonetic/reading_overrides.json` (plus `WithReadingOverrides` / `WithReadingOverridesJSON`) holds the pinned entries; `WithNumberReading` is the same idea for numerals: Arabic numerals, whose readings the IPA dictionary does not carry at all, and kanji numerals followed by a counter, where the dictionary reads the digits but not the sound change at the join (三本 → サンホン). Numeral-plus-counter readings belong in `phonetic/number.go`, never in the override JSON — a table entry fixes one number, the rule fixes all of them.
 
 Two orderings in `convertLine` are load-bearing and easy to get backwards:
 

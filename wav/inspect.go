@@ -17,12 +17,9 @@ func (i Info) Duration() time.Duration {
 	if rate == 0 || i.DataSize <= 0 {
 		return 0
 	}
-	// 秒と端数に分けて整数のまま計算する。浮動小数点を経由すると、
-	// サンプル境界ちょうどの長さでも 1ns 単位の誤差が乗ることがある。
-	size := uint64(i.DataSize)
-	seconds := size / rate
-	remainder := size % rate
-	return time.Duration(seconds)*time.Second + time.Duration(remainder*uint64(time.Second)/rate)
+	// 整数のまま計算する。浮動小数点を経由すると、サンプル境界ちょうどの長さでも
+	// 1ns 単位の誤差が乗ることがある。
+	return time.Duration(mulDiv(uint64(i.DataSize), uint64(time.Second), rate))
 }
 
 // Inspect は WAV バイナリを解析し、フォーマットと音声データの概要を返します。

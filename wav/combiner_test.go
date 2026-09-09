@@ -163,13 +163,110 @@ func TestCombineWavDataWithGapKeepsBlockAlignment(t *testing.T) {
 	}
 }
 
+// factSampleCount は WAV の fact チャンクが持つサンプル数を返します。
+// fact チャンクが無ければ -1 を返します。
+func factSampleCount(t *testing.T, wavBytes []byte) int64 {
+	t.Helper()
+	offset := bytes.Index(wavBytes, []byte("fact"))
+	if offset < 0 {
+		return -1
+	}
+	return int64(binary.LittleEndian.Uint32(wavBytes[offset+chunkHeaderSize:]))
+}
+
+// factPayloadPrefix は WAV の fact チャンクのペイロード先頭 2 バイトを返します。
+func factPayloadPrefix(t *testing.T, wavBytes []byte) []byte {
+	t.Helper()
+	offset := bytes.Index(wavBytes, []byte("fact"))
+	if offset < 0 {
+		t.Fatal("fact チャンクが見つかりません")
+	}
+	return wavBytes[offset+chunkHeaderSize : offset+chunkHeaderSize+2]
+}
+
+// factChunk は sampleCount を持つ fact チャンクのペイロードを返します。
+func factChunk(sampleCount uint32) []byte {
+	return binary.LittleEndian.AppendUint32(nil, sampleCount)
+}
+
+// TestCombineWavDataUpdatesFactChunk は、先頭ファイルから引き継いだ fact チャンクの
+// サンプル数が、1 本目の長さではなく結合後の長さになることを確認します。
+func TestCombineWavDataUpdatesFactChunk(t *testing.T) {
+	// defaultSpec は 16bit モノラルなので、ブロックアラインは 2 バイト。
+	first := insertChunkBeforeData(buildWAV(defaultSpec([]byte{1, 2, 3, 4})), "fact", factChunk(2))
+	second := buildWAV(defaultSpec([]byte{5, 6, 7, 8, 9, 10}))
+
+	tests := []struct {
+		name string
+		opts []CombineOption
+		want int64
+	}{
+		{name: "無音なし", want: 5},
+		// 1ms の無音は 24 サンプル。
+		{name: "無音あり", opts: []CombineOption{WithGap(time.Millisecond)}, want: 5 + 24},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			combined, err := CombineWavData([][]byte{first, second}, tt.opts...)
+			if err != nil {
+				t.Fatalf("CombineWavData() error = %v", err)
+			}
+			if got := factSampleCount(t, combined); got != tt.want {
+				t.Errorf("fact のサンプル数 = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCombineWavDataLeavesUnusableFactChunk は、サンプル数を書ける形をしていない
+// fact チャンクには手を付けないことを確認します。
+func TestCombineWavDataLeavesUnusableFactChunk(t *testing.T) {
+	// 4bit はブロックアラインが 0 バイトになり、サンプル数を求められない。
+	fourBit := func(audio []byte) wavSpec {
+		return wavSpec{audioFormat: 1, numChannels: 1, sampleRate: 24000, bitsPerSample: 4, audio: audio}
+	}
+
+	tests := []struct {
+		name  string
+		parts [][]byte
+	}{
+		{
+			name: "ペイロードが4バイト未満",
+			parts: [][]byte{
+				insertChunkBeforeData(buildWAV(defaultSpec([]byte{1, 2, 3, 4})), "fact", []byte{2, 0}),
+				buildWAV(defaultSpec([]byte{5, 6})),
+			},
+		},
+		{
+			name: "ブロックアラインが0",
+			parts: [][]byte{
+				insertChunkBeforeData(buildWAV(fourBit([]byte{1, 2, 3, 4})), "fact", factChunk(2)),
+				buildWAV(fourBit([]byte{5, 6})),
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			combined, err := CombineWavData(tt.parts)
+			if err != nil {
+				t.Fatalf("CombineWavData() error = %v", err)
+			}
+			got := factPayloadPrefix(t, combined)
+			want := factPayloadPrefix(t, tt.parts[0])
+			if !bytes.Equal(got, want) {
+				t.Errorf("fact のペイロード = %v, want %v (変更されないこと)", got, want)
+			}
+		})
+	}
+}
+
 // TestBuildCombinedHeaderRejectsOversizedResult は、RIFF が表現できない 4GB 超の
 // 結合を専用のエラー型で弾くことを確認します。実際に 4GB を確保せずに検証するため、
 // ヘッダー組み立てを直接呼びます。
 func TestBuildCombinedHeaderRejectsOversizedResult(t *testing.T) {
 	formatHeader := buildWAV(defaultSpec(nil))[:36]
 
-	_, err := buildCombinedHeader(formatHeader, math.MaxUint32)
+	_, err := buildCombinedHeader(formatHeader, Format{}, math.MaxUint32)
 	if err == nil {
 		t.Fatal("buildCombinedHeader() error = nil, want ErrWAVTooLarge")
 	}

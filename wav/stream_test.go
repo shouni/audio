@@ -62,6 +62,14 @@ func TestCombineToMatchesCombineWavData(t *testing.T) {
 			},
 		},
 		{
+			name: "factチャンクがある",
+			parts: [][]byte{
+				insertChunkBeforeData(buildWAV(defaultSpec([]byte{1, 2, 3, 4})), "fact", factChunk(2)),
+				buildWAV(defaultSpec([]byte{5, 6})),
+			},
+			opts: []CombineOption{WithGap(time.Millisecond)},
+		},
+		{
 			name: "拡張形式",
 			parts: [][]byte{
 				buildExtensibleWAV(defaultExtensibleSpec([]byte{1, 2, 3, 4})),

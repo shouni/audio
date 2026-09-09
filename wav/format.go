@@ -36,6 +36,13 @@ func (f Format) AudioFormatTag() uint16 {
 	return binary.LittleEndian.Uint16(f.SubFormat[0:2])
 }
 
+// mulDiv は value×numerator÷denominator を、value を denominator で割った商と余りに
+// 分けて計算します。先に掛けると、長い時間や高いレートで uint64 を超えるためです。
+// 商は整数なので、余りの側だけ割れば結果は切り捨てと一致します。
+func mulDiv(value, numerator, denominator uint64) uint64 {
+	return value/denominator*numerator + value%denominator*numerator/denominator
+}
+
 // byteRate は1秒あたりのバイト数を返します。
 func (f Format) byteRate() uint64 {
 	return uint64(f.SampleRate) * uint64(f.blockAlign())

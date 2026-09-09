@@ -81,18 +81,6 @@ func TestConverter_ConvertToReading(t *testing.T) {
 			input: "コンニチハム",
 			want:  "コンニチハム",
 		},
-		// 形態素解析器は「一歩」を 一/歩 に分割して辞書読みを連結するため「イチホ」になる。
-		// 促音便は解析側では直せないので読み上書きで補正する。
-		{
-			name:  "一+助数詞の促音便",
-			input: "僕が一歩を踏み出す",
-			want:  "ボクガイッポオフミダス",
-		},
-		{
-			name:  "促音便の上書きは複合語を壊さない",
-			input: "一本気な一匹狼",
-			want:  "イッポンギナイッピキオオカミ",
-		},
 		// 「掌」の上書きが「掌握」の「握」を巻き込んで欠落させないこと。
 		// 読み上書きは形態素境界で終わる一致だけを採用する。
 		//
@@ -442,9 +430,12 @@ func TestDefaultReadingOverrides_KeepsCompoundsIntact(t *testing.T) {
 // TestDefaultReadingOverrides_NoRedundantEntries は、辞書が既に正しく読める語に
 // 上書きを置いていないことを確認します。
 //
-// 上書きは「辞書が間違える語」の一覧であることに価値があります。辞書と同じ読みを
+// 上書きは「辞書と数の規則が間違える語」の一覧であることに価値があります。同じ読みを
 // 書いたエントリは挙動を変えないまま増え続け、本当に危ない語を見分けられなくします。
 // 実際、一度は 120 件中 51 件が辞書と同一でした。
+//
+// 比較の基準には数の規則（WithNumberReading）も含めます。「一本」のように数の規則で
+// 読める語は上書きに置かず、規則が読み違える語（「一日」→ イチニチ）だけを置くためです。
 //
 // 単語単体だけでなく複数の文脈で比較します。「何時」のように、単体では辞書も
 // イツと読むが文中ではナンジになる語があり、単体比較だけでは必要な上書きまで
@@ -454,10 +445,10 @@ func TestDefaultReadingOverrides_NoRedundantEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create tokenizer: %v", err)
 	}
-	plain := &Converter{t: tok, readingOverrides: map[string]string{}}
+	plain := &Converter{t: tok, readingOverrides: map[string]string{}, numberReading: true}
 	plain.rebuildOverrideKeys()
 
-	overridden, err := NewConverter()
+	overridden, err := NewConverter(WithNumberReading())
 	if err != nil {
 		t.Fatalf("failed to create converter: %v", err)
 	}
