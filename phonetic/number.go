@@ -94,11 +94,11 @@ func readInteger(value uint64) string {
 	}
 
 	var sb strings.Builder
-	for i := len(groups) - 1; i >= 0; i-- {
-		if groups[i] == 0 {
+	for i, g := range slices.Backward(groups) {
+		if g == 0 {
 			continue
 		}
-		group := readGroup(int(groups[i]))
+		group := readGroup(int(g))
 		if i == 0 {
 			sb.WriteString(group)
 			continue
@@ -441,6 +441,31 @@ var counters = map[string]counter{
 	"拍": {reading: "ハク", class: soundP},
 	"編": {reading: "ヘン", class: soundP},
 	"篇": {reading: "ヘン", class: soundP},
+
+	// 場所と単位。単位はカタカナ語でも促音便が起きます（一キロ→イッキロ、一セット→イッセット）。
+	"ヶ所":      {reading: "カショ", class: soundK},
+	"ケ所":      {reading: "カショ", class: soundK},
+	"か所":      {reading: "カショ", class: soundK},
+	"カ所":      {reading: "カショ", class: soundK},
+	"箇所":      {reading: "カショ", class: soundK},
+	"丁目":      {reading: "チョウメ", class: soundT},
+	"頭":       {reading: "トウ", class: soundT},
+	"ページ":     {reading: "ページ", class: soundP},
+	"キロ":      {reading: "キロ", class: soundK},
+	"キロメートル":  {reading: "キロメートル", class: soundK},
+	"キログラム":   {reading: "キログラム", class: soundK},
+	"センチ":     {reading: "センチ", class: soundS},
+	"センチメートル": {reading: "センチメートル", class: soundS},
+	"セット":     {reading: "セット", class: soundS},
+	"トン":      {reading: "トン", class: soundT},
+
+	// 和語で数える助数詞。一つ・二つだけは ヒト・フタ になり、三つ以降は漢語の数に戻ります。
+	"組":  {reading: "クミ", class: soundK, irregular: map[uint64]string{1: "ヒトクミ", 2: "フタクミ"}},
+	"株":  {reading: "カブ", class: soundK, irregular: map[uint64]string{1: "ヒトカブ", 2: "フタカブ"}},
+	"切れ": {reading: "キレ", class: soundK, irregular: map[uint64]string{1: "ヒトキレ", 2: "フタキレ"}},
+	"皿":  {reading: "サラ", class: soundS, irregular: map[uint64]string{1: "ヒトサラ", 2: "フタサラ"}},
+	"粒":  {reading: "ツブ", class: soundT, irregular: map[uint64]string{1: "ヒトツブ", 2: "フタツブ"}},
+	"袋":  {reading: "フクロ", class: soundH, irregular: map[uint64]string{1: "ヒトフクロ", 2: "フタフクロ"}},
 
 	// 位取りの漢字のうち、促音便が起きる兆だけ。万・億は辞書の読みのままで正しく、
 	// 京は数としてまず使われず地名や熟語で誤爆する方が多いため入れていません。

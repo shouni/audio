@@ -64,7 +64,7 @@ func CombineTo(w io.Writer, sources []io.ReadSeeker, opts ...CombineOption) erro
 	if err != nil {
 		return err
 	}
-	header, err := buildCombinedHeader(formatHeader, totalAudioSize)
+	header, err := buildCombinedHeader(formatHeader, parts[0].format, totalAudioSize)
 	if err != nil {
 		return err
 	}

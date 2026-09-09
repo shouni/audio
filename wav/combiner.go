@@ -112,7 +112,7 @@ func CombineWavData(wavDataList [][]byte, opts ...CombineOption) ([]byte, error)
 		totalAudioSize += uint64(len(current.audioData))
 	}
 
-	return buildCombinedWav(first.formatHeader, extractedAudio, totalAudioSize)
+	return buildCombinedWav(first, extractedAudio, totalAudioSize)
 }
 
 // verifySameFormat は、結合対象のフォーマットが先頭ファイルと一致することを確認します。

@@ -35,7 +35,7 @@ Per-function rationale lives in the doc comments (`wav/combiner.go`, `wav/stream
 
 ### Combining does not decode, so formats must match
 
-`data` chunk payloads are concatenated as bytes and the output header is the **first** file's `fmt` chunk, reused verbatim. That is what makes the operation lossless — there is no re-encode and therefore no generation loss — and it is also why `verifySameFormat` has to reject any mismatch in format tag, channel count, sample rate, bit depth, channel mask, or `WAVE_FORMAT_EXTENSIBLE` sub-format GUID. Without that check a 48kHz stereo part would be played back under a 24kHz mono header: wrong speed, wrong pitch, wrong channel assignment, and no error. `0xFFFE` in the format tag says nothing on its own, hence the comparison down to the GUID.
+`data` chunk payloads are concatenated as bytes and the output header is the **first** file's `fmt` chunk, reused verbatim. The only thing rewritten in the carried header besides the RIFF size is a `fact` chunk's sample count (`updateFactChunk`), which would otherwise keep describing the first file's length. That is what makes the operation lossless — there is no re-encode and therefore no generation loss — and it is also why `verifySameFormat` has to reject any mismatch in format tag, channel count, sample rate, bit depth, channel mask, or `WAVE_FORMAT_EXTENSIBLE` sub-format GUID. Without that check a 48kHz stereo part would be played back under a 24kHz mono header: wrong speed, wrong pitch, wrong channel assignment, and no error. `0xFFFE` in the format tag says nothing on its own, hence the comparison down to the GUID.
 
 Callers wanting to mix formats must resample first. Do not "fix" a mismatch by relaxing the comparison.
 
