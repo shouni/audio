@@ -49,10 +49,7 @@ func (c combineConfig) silence(format Format) []byte {
 		return nil
 	}
 
-	// 秒と端数に分けて掛けることで、長い gap でも uint64 の範囲に収める。
-	gapNanos := uint64(c.gap)
-	nanosPerSecond := uint64(time.Second)
-	size := gapNanos/nanosPerSecond*byteRate + gapNanos%nanosPerSecond*byteRate/nanosPerSecond
+	size := mulDiv(uint64(c.gap), byteRate, uint64(time.Second))
 	size -= size % blockAlign
 	if size == 0 {
 		return nil

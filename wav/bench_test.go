@@ -42,7 +42,8 @@ func BenchmarkCombineWavDataWithGap(b *testing.B) {
 }
 
 // BenchmarkCombineTo は、出力バッファを確保しない経路の割り当て量を測ります。
-// 本数を増やしても allocs/op と B/op が伸びないことが、ストリーミングの狙いです。
+// 割り当ては 1 本あたり走査結果と io.CopyN の LimitReader ぶんの定数で、音声の長さには
+// 依存しません。本数を 8 倍にしても B/op がそれ以上に伸びないことを確かめます。
 func BenchmarkCombineTo(b *testing.B) {
 	for _, count := range []int{8, 64} {
 		b.Run(fmt.Sprintf("%d本", count), func(b *testing.B) {

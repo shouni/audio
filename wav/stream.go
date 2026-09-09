@@ -1,7 +1,6 @@
 package wav
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io"
 )
@@ -10,17 +9,6 @@ import (
 // 上限です。ストリーミング結合はメモリ使用量を入力サイズから切り離すのが目的なので、
 // 巨大なメタデータチャンクを丸ごと読み込んでその前提を壊さないよう歯止めを置きます。
 const maxCarriedHeaderSize = 1 << 20 // 1MiB
-
-// streamParts は1つの WAV について、走査で判明した位置とフォーマットです。
-type streamParts struct {
-	format Format
-	// headerSize は data チャンクヘッダーが始まる位置、つまり引き継ぐヘッダーの長さです。
-	headerSize int64
-	// dataOffset は data チャンクのペイロードが始まる位置です。
-	dataOffset int64
-	// dataSize は data チャンクのペイロードのバイト数です。
-	dataSize int64
-}
 
 // CombineTo は複数の WAV を結合し、結果を w へ書き出します。
 //
@@ -39,10 +27,14 @@ func CombineTo(w io.Writer, sources []io.ReadSeeker, opts ...CombineOption) erro
 	}
 	cfg := newCombineConfig(opts)
 
-	parts := make([]streamParts, len(sources))
+	parts := make([]wavLayout, len(sources))
 	var totalAudioSize uint64
 	for i, source := range sources {
-		part, err := scanStream(source, i)
+		src, err := streamSource(source, i)
+		if err != nil {
+			return err
+		}
+		part, err := scanWAV(&src)
 		if err != nil {
 			return err
 		}
@@ -88,83 +80,6 @@ func CombineTo(w io.Writer, sources []io.ReadSeeker, opts ...CombineOption) erro
 	return nil
 }
 
-// scanStream は WAV を走査し、フォーマットと data チャンクの位置を調べます。
-// 音声データそのものは読み込まず、チャンクヘッダーだけを辿ります。
-func scanStream(source io.ReadSeeker, index int) (streamParts, error) {
-	size, err := source.Seek(0, io.SeekEnd)
-	if err != nil {
-		return streamParts{}, streamIOError(index, err)
-	}
-
-	var riffHeader [wavRiffHeaderSize]byte
-	if err := readAt(source, 0, riffHeader[:], index); err != nil {
-		if size < wavRiffHeaderSize {
-			return streamParts{}, &ErrInvalidWAVHeader{
-				Index:   index,
-				Details: fmt.Sprintf("WAVファイルサイズが短すぎます (RIFFヘッダー不足: %dバイト)", size),
-			}
-		}
-		return streamParts{}, err
-	}
-	if err := validateRiffHeader(riffHeader[:], index); err != nil {
-		return streamParts{}, err
-	}
-
-	var (
-		format        Format
-		fmtChunkFound bool
-	)
-	for offset := int64(wavRiffHeaderSize); offset+chunkHeaderSize <= size; {
-		var chunkHeader [chunkHeaderSize]byte
-		if err := readAt(source, offset, chunkHeader[:], index); err != nil {
-			return streamParts{}, err
-		}
-		id := string(chunkHeader[:chunkIDSize])
-		chunkSize := binary.LittleEndian.Uint32(chunkHeader[chunkIDSize:])
-
-		switch id {
-		case "fmt ":
-			payloadStart := offset + chunkHeaderSize
-			payload := make([]byte, min(int64(chunkSize), extensibleFormatChunkSize, size-payloadStart))
-			if err := readAt(source, payloadStart, payload, index); err != nil {
-				return streamParts{}, err
-			}
-			if format, err = parseFormatPayload(payload, chunkSize, index); err != nil {
-				return streamParts{}, err
-			}
-			fmtChunkFound = true
-		case "data":
-			if !fmtChunkFound {
-				return streamParts{}, missingChunkError(index, "'fmt '")
-			}
-			dataOffset := offset + chunkHeaderSize
-			if int64(chunkSize) > size-dataOffset {
-				return streamParts{}, &ErrInvalidWAVHeader{
-					Index:   index,
-					Details: "dataチャンクのデータ長が実際のファイルサイズを超過しています",
-				}
-			}
-			return streamParts{
-				format:     format,
-				headerSize: offset,
-				dataOffset: dataOffset,
-				dataSize:   int64(chunkSize),
-			}, nil
-		}
-
-		nextOffset := nextChunkOffset(uint64(offset), chunkSize)
-		if nextOffset > uint64(size) {
-			break
-		}
-		offset = int64(nextOffset)
-	}
-
-	if fmtChunkFound {
-		return streamParts{}, missingChunkError(index, "'data'")
-	}
-	return streamParts{}, missingChunkError(index, "'fmt '", "'data'")
-}
-
 // readCarriedHeader は先頭ファイルから、そのまま出力へ引き継ぐヘッダーを読み込みます。
 func readCarriedHeader(source io.ReadSeeker, headerSize int64) ([]byte, error) {
 	if headerSize > maxCarriedHeaderSize {
@@ -174,23 +89,8 @@ func readCarriedHeader(source io.ReadSeeker, headerSize int64) ([]byte, error) {
 		}
 	}
 	header := make([]byte, headerSize)
-	if err := readAt(source, 0, header, 0); err != nil {
+	if err := readFull(source, 0, header, 0); err != nil {
 		return nil, err
 	}
 	return header, nil
-}
-
-// readAt は offset から buf を埋めるだけ読み込みます。
-func readAt(source io.ReadSeeker, offset int64, buf []byte, index int) error {
-	if _, err := source.Seek(offset, io.SeekStart); err != nil {
-		return streamIOError(index, err)
-	}
-	if _, err := io.ReadFull(source, buf); err != nil {
-		return streamIOError(index, err)
-	}
-	return nil
-}
-
-func streamIOError(index int, err error) error {
-	return fmt.Errorf("WAVファイル #%d の読み込みに失敗しました: %w", index, err)
 }

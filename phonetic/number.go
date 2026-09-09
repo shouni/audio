@@ -1,6 +1,7 @@
 package phonetic
 
 import (
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -490,29 +491,8 @@ func monthReadings() map[uint64]string {
 	return readings
 }
 
-// counterKeysByFirstRune は助数詞のキーを先頭ルーンごとにまとめ、最長一致のために
-// 各グループを長い順で保持します。読み上書きの索引と同じ作りです。
-var counterKeysByFirstRune = buildCounterIndex()
-
-func buildCounterIndex() map[rune][]string {
-	keys := make([]string, 0, len(counters))
-	for key := range counters {
-		keys = append(keys, key)
-	}
-	slices.SortFunc(keys, func(a, b string) int {
-		if diff := len(b) - len(a); diff != 0 {
-			return diff
-		}
-		return strings.Compare(a, b)
-	})
-
-	index := make(map[rune][]string)
-	for _, key := range keys {
-		first, _ := utf8.DecodeRuneInString(key)
-		index[first] = append(index[first], key)
-	}
-	return index
-}
+// counterIndex は助数詞のキーを最長一致で引くための索引です。
+var counterIndex = newPrefixIndex(slices.Collect(maps.Keys(counters)))
 
 // matchNumberAt は、tokens[i] から始まる数字の並びと、それに続く助数詞をまとめて読みます。
 // 戻り値は読み、読み終えた次のトークン位置、そして数字の並びを見つけたかどうかです。
@@ -527,7 +507,7 @@ func (c *Converter) matchNumberAt(input string, tokens []tokenizer.Token, i int,
 	}
 
 	number := readNumeral(digits)
-	key, found := matchCounterAt(input, end, boundaries)
+	key, found := counterIndex.match(input, end, boundaries)
 	if !found {
 		return number.reading, next, true
 	}
@@ -626,23 +606,4 @@ func normalizeDigits(s string) string {
 		}
 		return r
 	}, s)
-}
-
-// matchCounterAt は、start から始まり形態素境界で終わる最長の助数詞を返します。
-func matchCounterAt(input string, start int, boundaries map[int]struct{}) (string, bool) {
-	if start >= len(input) {
-		return "", false
-	}
-	rest := input[start:]
-	first, _ := utf8.DecodeRuneInString(rest)
-	for _, key := range counterKeysByFirstRune[first] {
-		if !strings.HasPrefix(rest, key) {
-			continue
-		}
-		if _, ok := boundaries[start+len(key)]; !ok {
-			continue
-		}
-		return key, true
-	}
-	return "", false
 }

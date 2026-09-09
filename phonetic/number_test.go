@@ -290,7 +290,7 @@ func TestCountersHaveKatakanaReadings(t *testing.T) {
 // TestCounterIndexIsLongestFirst は、助数詞の索引が長い順に並んでいることを確認します。
 // 短い順だと "ヶ月" より先に "月" が一致し、"3ヶ月" がサンヶガツになります。
 func TestCounterIndexIsLongestFirst(t *testing.T) {
-	for first, keys := range counterKeysByFirstRune {
+	for first, keys := range counterIndex {
 		for i := 1; i < len(keys); i++ {
 			if len(keys[i-1]) < len(keys[i]) {
 				t.Errorf("先頭 %q のキーが長さ順ではありません: %v", string(first), keys)
@@ -347,8 +347,7 @@ func TestCounters_NoRedundantEntries(t *testing.T) {
 func dictionaryReadingOf(tok *tokenizer.Tokenizer, surface string) string {
 	var sb strings.Builder
 	for _, token := range tok.Tokenize(surface) {
-		features := token.Features()
-		sb.WriteString(dictionaryReading(token, features))
+		sb.WriteString(dictionaryReading(token))
 	}
 	return sb.String()
 }

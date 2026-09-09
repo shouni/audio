@@ -31,7 +31,7 @@ CI (`.github/workflows/ci.yml`) is a thin caller of the shared `shouni/workflows
 
 ## Design decisions
 
-Per-function rationale lives in the doc comments (`wav/combiner.go`, `wav/stream.go`, `phonetic/converter.go` carry the detail). This section covers only what a single file cannot say from inside.
+Per-function rationale lives in the doc comments (`wav/header.go`, `wav/combiner.go`, `wav/stream.go`, `phonetic/converter.go` carry the detail). This section covers only what a single file cannot say from inside.
 
 ### Combining does not decode, so formats must match
 
@@ -41,7 +41,7 @@ Callers wanting to mix formats must resample first. Do not "fix" a mismatch by r
 
 ### The two combine paths must stay indistinguishable
 
-`CombineWavData` (bytes in, bytes out) and `CombineTo` (`io.ReadSeeker` → `io.Writer`) differ only in memory use: the streaming path's footprint is independent of the audio's length and of how many parts there are. Their validation, their errors, and their output bytes are required to be identical, and `FuzzCombineToMatchesCombineWavData` pins exactly that — if one path accepts an input the other rejects, the result would depend on which API a caller happened to pick.
+`CombineWavData` (bytes in, bytes out) and `CombineTo` (`io.ReadSeeker` → `io.Writer`) differ only in memory use: the streaming path's footprint is independent of the audio's length and of how many parts there are. Their validation, their errors, and their output bytes are required to be identical, and `FuzzCombineToMatchesCombineWavData` pins exactly that — if one path accepts an input the other rejects, the result would depend on which API a caller happened to pick. Both paths scan through the same `scanWAV` over a `chunkSource` (bytes or `io.ReadSeeker`), so a divergence can only be introduced after scanning. `chunkSource` is a struct rather than an interface on purpose: an interface method call makes its arguments escape, and `Inspect` is meant to run without allocating.
 
 `CombineTo` takes `io.ReadSeeker` rather than `io.Reader` because the RIFF and `data` chunk sizes go at the front of the output and are not known until everything has been measured, so the inputs are scanned twice. `maxCarriedHeaderSize` (1MiB) caps the header carried over from the first file, so an enormous metadata chunk cannot quietly reinstate the memory cost the streaming path exists to avoid.
 
