@@ -68,8 +68,129 @@ func TestConverter_NumberReadingIsOptIn(t *testing.T) {
 		t.Fatalf("NewConverter() error = %v", err)
 	}
 
-	if got, want := converter.ConvertToReading("2026年8月25日"), "2026ネン8ツキ25ニチ"; got != want {
-		t.Errorf("ConvertToReading() = %q, want %q", got, want)
+	for input, want := range map[string]string{
+		"2026年8月25日": "2026ネン8ツキ25ニチ",
+		"三本と一人":      "サンホントイチニン",
+	} {
+		if got := converter.ConvertToReading(input); got != want {
+			t.Errorf("ConvertToReading(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+// TestKanjiNumerals は、漢数字に助数詞が続くときだけ数の規則で読むことを確認します。
+//
+// 辞書は漢数字そのものは読めますが（三 → サン）、助数詞との境目の音の変化を持たないため
+// "三本" が サンホン になります。かつては「一本」「二人」などを読み上書きで個別に直して
+// いましたが、数が変わるたびに外れる（三本・十本は誰も直していない）ので規則に寄せました。
+func TestKanjiNumerals(t *testing.T) {
+	converter, err := NewConverter(WithNumberReading())
+	if err != nil {
+		t.Fatalf("NewConverter() error = %v", err)
+	}
+
+	tests := []struct {
+		name string
+		want map[string]string
+	}{
+		{
+			name: "助数詞との境目で音が変わる",
+			want: map[string]string{
+				"三本": "サンボン", "十本": "ジュッポン", "一本の矢": "イッポンノヤ",
+				"一階": "イッカイ", "一杯": "イッパイ", "一発": "イッパツ", "一回": "イッカイ",
+				"一週間": "イッシュウカン", "一分": "イップン", "十分": "ジュップン",
+			},
+		},
+		{
+			name: "特殊読み",
+			want: map[string]string{
+				"一人": "ヒトリ", "二人で": "フタリデ", "一粒": "ヒトツブ",
+				"三日": "ミッカ", "四日": "ヨッカ", "二十日": "ハツカ", "二十歳": "ハタチ",
+				"四人": "ヨニン", "四年": "ヨネン",
+			},
+		},
+		{
+			name: "促音便を上書きに頼っていた語",
+			want: map[string]string{
+				"僕が一歩を踏み出す": "ボクガイッポオフミダス",
+				"一本気な一匹狼":   "イッポンギナイッピキオオカミ",
+			},
+		},
+		{
+			name: "位取りと桁の列",
+			want: map[string]string{
+				"二千二十六年": "ニセンニジュウロクネン", "二〇二六年": "ニセンニジュウロクネン",
+				"十万人": "ジュウマンニン", "百万本": "ヒャクマンボン", "一千万人": "イッセンマンニン",
+				"一〇〇本": "ヒャッポン", "何十本": "ナンジュッポン", "数十人": "スウジュウニン",
+			},
+		},
+		{
+			name: "助数詞が続かない漢数字は辞書読みのまま",
+			want: map[string]string{
+				"三": "サン", "千の風": "センノカゼ", "三三七拍子": "サンサンナナヒョウシ",
+				"一途": "イチズ", "四季": "シキ", "十分な": "ジュウブンナ", "一人前": "イチニンマエ",
+			},
+		},
+		{
+			name: "単位語で始まる並びは数ではない",
+			want: map[string]string{
+				"万円": "マンエン", "数万円": "スウマンエン", "万感の思い": "バンカンノオモイ",
+			},
+		},
+		{
+			// "一日" は規則だと ツイタチ になるが、歌詞や文中ではほぼ イチニチ（一日中、一日の終わり）。
+			// 上書きが規則より先に効くので、こちらは読み上書きで守る。算用数字の "1日" は日付なので ツイタチ のまま。
+			name: "一日は上書きでイチニチ",
+			want: map[string]string{
+				"一日中": "イチニチチュウ", "一日の終わり": "イチニチノオワリ", "1日": "ツイタチ",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for input, want := range tt.want {
+				if got := converter.ConvertToReading(input); got != want {
+					t.Errorf("ConvertToReading(%q) = %q, want %q", input, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestParseKanjiNumeral(t *testing.T) {
+	tests := []struct {
+		input string
+		want  uint64
+		ok    bool
+	}{
+		{"〇", 0, true},
+		{"三", 3, true},
+		{"十", 10, true},
+		{"十二", 12, true},
+		{"二十", 20, true},
+		{"二千二十六", 2026, true},
+		{"二〇二六", 2026, true},
+		{"一〇〇", 100, true},
+		{"十万", 100_000, true},
+		{"百万", 1_000_000, true},
+		{"一千万", 10_000_000, true},
+		{"三億二千万", 320_000_000, true},
+		{"一兆", 1_000_000_000_000, true},
+		{"", 0, false},
+		{"万", 0, false},
+		{"億", 0, false},
+		{"三二十", 0, false},
+		{"一二三四五六七八九〇一二三四五六七八九", 0, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got, ok := parseKanjiNumeral(tt.input)
+			if ok != tt.ok || got != tt.want {
+				t.Errorf("parseKanjiNumeral(%q) = (%d, %v), want (%d, %v)", tt.input, got, ok, tt.want, tt.ok)
+			}
+		})
 	}
 }
 
@@ -119,14 +240,14 @@ func TestCounterSoundChanges(t *testing.T) {
 			want: map[string]string{
 				"1本": "イッポン", "3本": "サンボン", "4本": "ヨンホン",
 				"6本": "ロッポン", "10本": "ジュッポン", "100本": "ヒャッポン",
-				"1000本": "センボン", "3杯": "サンバイ", "3匹": "サンビキ",
+				"1000本": "センボン", "10000本": "イチマンボン", "3杯": "サンバイ", "3匹": "サンビキ",
 			},
 		},
 		{
 			name: "ハ行でも発と泊は三で半濁音",
 			want: map[string]string{
 				"1発": "イッパツ", "3発": "サンパツ", "4発": "ヨンハツ",
-				"6発": "ロッパツ", "3泊": "サンパク", "3編": "サンペン",
+				"6発": "ロッパツ", "3泊": "サンパク", "3編": "サンペン", "10000発": "イチマンパツ",
 			},
 		},
 		{
@@ -183,9 +304,10 @@ func TestNumberReadingRespectsTokenBoundaries(t *testing.T) {
 		want  string
 	}{
 		{"3人称", "サンニンショウ"},
+		{"一人称", "イチニンショウ"},
 		{"兆し", "キザシ"},
 		{"万感の思い", "バンカンノオモイ"},
-		// 漢数字は辞書が正しく読めるので触らない。
+		// 辞書が 1 語で持つ漢数字入りの語は分割されないので触らない。
 		{"十二月", "ジュウニガツ"},
 	}
 
@@ -245,6 +367,8 @@ func TestReadInteger(t *testing.T) {
 		{1234, "センニヒャクサンジュウヨン"},
 		{10000, "イチマン"},
 		{12345, "イチマンニセンサンビャクヨンジュウゴ"},
+		// 千の位は万・億が続くと イッセン になる。
+		{10000000, "イッセンマン"},
 		{100000000, "イチオク"},
 		// 位取りの単位にも促音便が起きる。
 		{1000000000000, "イッチョウ"},

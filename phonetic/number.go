@@ -17,6 +17,10 @@ import (
 //
 // このファイルは、数の並びを日本語の読みに直し、続く助数詞との間に起きる促音便・連濁・
 // 半濁音化（一回→イッカイ、三本→サンボン、六分→ロップン）を当てる処理をまとめます。
+//
+// 漢数字も同じ規則で扱います。辞書は漢数字そのものは読めますが（三 → サン）、助数詞との
+// 境目の音の変化は持たないため、"三本" は サンホン、"一階" は イチカイ になります。
+// 算用数字と違って単独の漢数字は辞書読みで足りるので、助数詞が続くときだけ引き受けます。
 
 // digitReadings は算用数字 1 文字ぶんの読みです。
 var digitReadings = [10]string{"ゼロ", "イチ", "ニ", "サン", "ヨン", "ゴ", "ロク", "ナナ", "ハチ", "キュウ"}
@@ -99,7 +103,7 @@ func readInteger(value uint64) string {
 		if g == 0 {
 			continue
 		}
-		group := readGroup(int(g))
+		group := readGroup(int(g), i > 0)
 		if i == 0 {
 			sb.WriteString(group)
 			continue
@@ -110,10 +114,11 @@ func readInteger(value uint64) string {
 }
 
 // readGroup は 1〜9999 の読みを組み立てます。
-func readGroup(n int) string {
+// scaled は上に万・億などの位が続くかで、千の位の読み方（セン／イッセン）を決めます。
+func readGroup(n int, scaled bool) string {
 	var sb strings.Builder
 	if d := n / 1000; d > 0 {
-		sb.WriteString(readThousands(d))
+		sb.WriteString(readThousands(d, scaled))
 	}
 	if d := n / 100 % 10; d > 0 {
 		sb.WriteString(readHundreds(d))
@@ -127,10 +132,14 @@ func readGroup(n int) string {
 	return sb.String()
 }
 
-// readThousands は千の位を読みます。1000 は「イチセン」ではなく「セン」です。
-func readThousands(d int) string {
+// readThousands は千の位を読みます。1000 は「イチセン」ではなく「セン」ですが、
+// 万・億が続くときは「一千万」のように イッセン と読みます（一千万→イッセンマン）。
+func readThousands(d int, scaled bool) string {
 	switch d {
 	case 1:
+		if scaled {
+			return "イッセン"
+		}
 		return "セン"
 	case 3:
 		return "サンゼン"
@@ -200,6 +209,8 @@ const (
 	tailTen
 	tailHundred
 	tailThousand
+	// tailMan は 万 で終わる数です。三と同じくハ行を濁らせます（百万本→ヒャクマンボン）。
+	tailMan
 )
 
 // numberTails は、促音便・連濁を起こす数の語尾です。
@@ -222,6 +233,7 @@ var numberTails = []struct {
 	{"ヨン", "", tailFour},
 	{"セン", "", tailThousand},
 	{"ゼン", "", tailThousand},
+	{"マン", "", tailMan},
 }
 
 // voicing は助数詞の頭に当てる濁り方です。
@@ -277,16 +289,16 @@ func soundChange(kind tailKind, class soundClass) (geminate bool, voice voicing)
 		if geminatesKRow(kind) {
 			return true, voicingSemi // 一本イッポン 六本ロッポン 百本ヒャッポン
 		}
-		if kind == tailThree || kind == tailThousand {
-			return false, voicingFull // 三本サンボン 千本センボン
+		if kind == tailThree || kind == tailThousand || kind == tailMan {
+			return false, voicingFull // 三本サンボン 千本センボン 万本マンボン
 		}
 		return false, voicingNone
 	case soundP, soundPYon:
 		if geminatesKRow(kind) {
 			return true, voicingSemi // 一発イッパツ 六発ロッパツ 十分ジュップン
 		}
-		if kind == tailThree || kind == tailThousand {
-			return false, voicingSemi // 三発サンパツ 千発センパツ
+		if kind == tailThree || kind == tailThousand || kind == tailMan {
+			return false, voicingSemi // 三発サンパツ 千発センパツ 万発マンパツ
 		}
 		if kind == tailFour && class == soundPYon {
 			return false, voicingSemi // 四分ヨンプン。四発はヨンハツのまま。
@@ -435,6 +447,7 @@ var counters = map[string]counter{
 	// ハ行。促音便に加えて連濁・半濁音化が起きます。三で濁るか半濁るかは助数詞ごとに違い、
 	// 三本サンボン・三杯サンバイに対して三発サンパツ・三泊サンパクになります。
 	"本": {reading: "ホン", class: soundH},
+	"歩": {reading: "ホ", class: soundP},
 	"匹": {reading: "ヒキ", class: soundH},
 	"杯": {reading: "ハイ", class: soundH},
 	"泊": {reading: "ハク", class: soundP},
@@ -494,24 +507,38 @@ func monthReadings() map[uint64]string {
 // counterIndex は助数詞のキーを最長一致で引くための索引です。
 var counterIndex = newPrefixIndex(slices.Collect(maps.Keys(counters)))
 
-// matchNumberAt は、tokens[i] から始まる数字の並びと、それに続く助数詞をまとめて読みます。
-// 戻り値は読み、読み終えた次のトークン位置、そして数字の並びを見つけたかどうかです。
+// matchNumberAt は、tokens[i] から始まる数の並びと、それに続く助数詞をまとめて読みます。
+// 戻り値は読み、読み終えた次のトークン位置、そして数として読んだかどうかです。
+//
+// 算用数字は辞書が読みを持たないので、助数詞の有無にかかわらず読みます。漢数字は辞書が
+// 単独では正しく読むので、助数詞が続いて音の変化が要るときだけ読みます。
 func (c *Converter) matchNumberAt(input string, tokens []tokenizer.Token, i int, boundaries map[int]struct{}) (string, int, bool) {
 	if !c.numberReading {
 		return "", 0, false
 	}
 
-	digits, end, next := scanDigits(tokens, i)
-	if digits == "" {
-		return "", 0, false
-	}
-
-	number := readNumeral(digits)
-	key, found := counterIndex.match(input, end, boundaries)
-	if !found {
+	if digits, end, next := scanDigits(tokens, i); digits != "" {
+		number := readNumeral(digits)
+		if key, found := counterIndex.match(input, end, boundaries); found {
+			return readWithCounter(number, key, tokens, end, next)
+		}
 		return number.reading, next, true
 	}
 
+	number, end, next, ok := scanKanjiNumeral(tokens, i)
+	if !ok {
+		return "", 0, false
+	}
+	key, found := counterIndex.match(input, end, boundaries)
+	if !found {
+		return "", 0, false
+	}
+	return readWithCounter(number, key, tokens, end, next)
+}
+
+// readWithCounter は数と助数詞 key をまとめて読み、助数詞を読み飛ばした次のトークン位置を返します。
+// end は数の並びの終端バイト位置、next は数を読み終えた次のトークン位置です。
+func readWithCounter(number numeral, key string, tokens []tokenizer.Token, end, next int) (string, int, bool) {
 	// 助数詞が覆ったトークンをまとめて読み飛ばす。"ヶ月" のように複数トークンに
 	// 割れる助数詞があるため、進めるのはトークン数ではなくバイト位置で判断する。
 	counterEnd := end + len(key)
@@ -519,6 +546,114 @@ func (c *Converter) matchNumberAt(input string, tokens []tokenizer.Token, i int,
 		next++
 	}
 	return counters[key].read(number), next, true
+}
+
+// kanjiDigitValues は漢数字の一桁の値、kanjiUnitValues は位取りの漢字の値です。
+var (
+	kanjiDigitValues = map[rune]uint64{
+		'〇': 0, '零': 0, '一': 1, '二': 2, '三': 3, '四': 4,
+		'五': 5, '六': 6, '七': 7, '八': 8, '九': 9,
+	}
+	kanjiUnitValues = map[rune]uint64{
+		'十': 10, '百': 100, '千': 1000,
+		'万': 10_000, '億': 100_000_000, '兆': 1_000_000_000_000,
+	}
+)
+
+// maxKanjiNumeralRunes は数として解釈する漢数字の並びの長さの上限です。
+// 桁の列（一二三…）として読んだときに uint64 に収まる範囲に抑えます。
+const maxKanjiNumeralRunes = 18
+
+// scanKanjiNumeral は tokens[i] から続く漢数字の並びを数として読み取ります。
+// 戻り値は数、並びの終端バイト位置、読み終えた次のトークン位置、数として解釈できたかです。
+// 形態素解析器は漢数字を 1 文字ずつのトークンにするため、並びをまとめてから値にします。
+func scanKanjiNumeral(tokens []tokenizer.Token, i int) (number numeral, end, next int, ok bool) {
+	var sb strings.Builder
+	for next = i; next < len(tokens) && isKanjiNumeralToken(tokens[next]); next++ {
+		sb.WriteString(tokens[next].Surface)
+		end = tokens[next].Position + len(tokens[next].Surface)
+	}
+	if next == i {
+		return numeral{}, 0, 0, false
+	}
+	value, ok := parseKanjiNumeral(sb.String())
+	if !ok {
+		return numeral{}, 0, 0, false
+	}
+	return numeral{reading: readInteger(value), value: value, hasValue: true}, end, next, true
+}
+
+// parseKanjiNumeral は漢数字の並びを数値にします。
+// 位取り（二千二十六）と桁の列（二〇二六）の両方を受け付けます。
+//
+// 万・億・兆で始まる並び（"万円"、"億"）は数ではなく単位語なので数としません。
+// 一桁が続いたあとに位取りが来る並び（"三二十"）は数として読めないので同じく退けます。
+func parseKanjiNumeral(s string) (uint64, bool) {
+	runes := []rune(s)
+	if len(runes) == 0 || len(runes) > maxKanjiNumeralRunes {
+		return 0, false
+	}
+
+	if !slices.ContainsFunc(runes, isKanjiUnit) {
+		var value uint64
+		for _, r := range runes {
+			value = value*10 + kanjiDigitValues[r]
+		}
+		return value, true
+	}
+
+	var (
+		total, section, digit uint64
+		hasDigit              bool
+	)
+	for _, r := range runes {
+		if d, ok := kanjiDigitValues[r]; ok {
+			if hasDigit {
+				return 0, false
+			}
+			digit, hasDigit = d, true
+			continue
+		}
+		unit := kanjiUnitValues[r]
+		if unit >= kanjiUnitValues['万'] {
+			section += digit
+			if section == 0 {
+				return 0, false
+			}
+			total += section * unit
+			section, digit, hasDigit = 0, 0, false
+			continue
+		}
+		multiplier := uint64(1)
+		if hasDigit {
+			multiplier = digit
+		}
+		section += multiplier * unit
+		digit, hasDigit = 0, false
+	}
+	return total + section + digit, true
+}
+
+// isKanjiNumeralToken は、トークンが漢数字と位取りの漢字だけで構成されているかを判定します。
+func isKanjiNumeralToken(token tokenizer.Token) bool {
+	if token.Surface == "" {
+		return false
+	}
+	for _, r := range token.Surface {
+		if _, ok := kanjiDigitValues[r]; ok {
+			continue
+		}
+		if !isKanjiUnit(r) {
+			return false
+		}
+	}
+	return true
+}
+
+// isKanjiUnit は位取りの漢字（十・百・千・万・億・兆）かを判定します。
+func isKanjiUnit(r rune) bool {
+	_, ok := kanjiUnitValues[r]
+	return ok
 }
 
 // scanDigits は tokens[i] から続く数字の並びを取り出します。

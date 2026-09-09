@@ -47,7 +47,7 @@ Callers wanting to mix formats must resample first. Do not "fix" a mismatch by r
 
 ### Fix the reading first, then hand it to the engine
 
-The morphological analyser is the base, not the authority. Proper nouns and coinages are read inconsistently by the dictionary, so the split is: **pin what can be pinned in a dictionary, and leave the rest to the analyser.** The embedded `phonetic/reading_overrides.json` (plus `WithReadingOverrides` / `WithReadingOverridesJSON`) holds the pinned entries; `WithNumberReading` is the same idea for Arabic numerals, whose readings the IPA dictionary does not carry at all.
+The morphological analyser is the base, not the authority. Proper nouns and coinages are read inconsistently by the dictionary, so the split is: **pin what can be pinned in a dictionary, and leave the rest to the analyser.** The embedded `phonetic/reading_overrides.json` (plus `WithReadingOverrides` / `WithReadingOverridesJSON`) holds the pinned entries; `WithNumberReading` is the same idea for numerals: Arabic numerals, whose readings the IPA dictionary does not carry at all, and kanji numerals followed by a counter, where the dictionary reads the digits but not the sound change at the join (三本 → サンホン). Numeral-plus-counter readings belong in `phonetic/number.go`, never in the override JSON — a table entry fixes one number, the rule fixes all of them.
 
 Two orderings in `convertLine` are load-bearing and easy to get backwards:
 
