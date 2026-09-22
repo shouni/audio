@@ -49,6 +49,12 @@ Callers wanting to mix formats must resample first. Do not "fix" a mismatch by r
 
 The morphological analyser is the base, not the authority. Proper nouns and coinages are read inconsistently by the dictionary, so the split is: **pin what can be pinned in a dictionary, and leave the rest to the analyser.** The embedded `phonetic/reading_overrides.json` (plus `WithReadingOverrides` / `WithReadingOverridesJSON`) holds the pinned entries; `WithNumberReading` is the same idea for numerals: Arabic numerals, whose readings the IPA dictionary does not carry at all, and kanji numerals followed by a counter, where the dictionary reads the digits but not the sound change at the join (三本 → サンホン). Numeral-plus-counter readings belong in `phonetic/number.go`, never in the override JSON — a table entry fixes one number, the rule fixes all of them.
 
+Three things in that file are less obvious than the tables:
+
+- **The counter table is keyed by what the analyser emits, not by the counter you'd write.** `3日間` tokenizes as `[3][日間]`, so a `日` entry never sees it and the dictionary reads サンニチカン; `日間` and `分間` are separate entries for that reason. When a reading comes out wrong, check the token split before touching the sound rules.
+- **`counter.contextual` exists for the one counter whose reading depends on what follows.** Arabic `1日` alone is a date (ツイタチ) and stays that way, but `1日中` / `1日目` / `1日3回` are durations (イチニチ); `readFirstDayAsDuration` looks at the next token for that. Kanji `一日` never reaches it — the dictionary reads it as one word and the override JSON pins イチニチ. `1日に3回` is left as ツイタチ: it is genuinely ambiguous and no local rule resolves it.
+- **Full-width digits arrive one token per character.** `２，０００` is `[２][，][０][０][０]`, so the thousands-separator rule counts the digit *run* after the comma (`digitRunAfter`), not the next token's width; a check on the next token alone can never fire for full-width input.
+
 Two orderings in `convertLine` are load-bearing and easy to get backwards:
 
 - **Tokenize the whole line once, then lay overrides on top.** Applying overrides first would cut the input into fragments that are then analysed without context, and the parts of speech come out wrong (the 「が」 in 「運命の閃光が」 is read as a conjunction rather than a particle once isolated, which drops both the particle correction and the phrase spacing).

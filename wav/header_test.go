@@ -125,18 +125,18 @@ func TestCombineWavDataAcceptsIdenticalFormat(t *testing.T) {
 // TestCombineWavDataPreservesChunksBeforeData は、fmt と data の間にある任意チャンクを
 // ヘッダーとして引き継ぐことを確認します。LIST/INFO を持つファイルでも壊れないこと。
 func TestCombineWavDataPreservesChunksBeforeData(t *testing.T) {
-	withList := insertChunkBeforeData(buildWAV(defaultSpec([]byte{1, 2, 3})), "LIST", []byte("abcdef"))
+	withList := insertChunkBeforeData(buildWAV(defaultSpec([]byte{1, 2, 3, 4})), "LIST", []byte("abcdef"))
 
-	combined, err := CombineWavData([][]byte{withList, buildWAV(defaultSpec([]byte{4, 5}))})
+	combined, err := CombineWavData([][]byte{withList, buildWAV(defaultSpec([]byte{5, 6}))})
 	if err != nil {
 		t.Fatalf("CombineWavData() error = %v", err)
 	}
 	if !bytes.Contains(combined, []byte("LIST")) {
 		t.Error("LIST チャンクがヘッダーから失われています")
 	}
-	gotAudio := combined[len(combined)-5:]
-	if !bytes.Equal(gotAudio, []byte{1, 2, 3, 4, 5}) {
-		t.Errorf("audio payload = %v, want [1 2 3 4 5]", gotAudio)
+	gotAudio := combined[len(combined)-6:]
+	if !bytes.Equal(gotAudio, []byte{1, 2, 3, 4, 5, 6}) {
+		t.Errorf("audio payload = %v, want [1 2 3 4 5 6]", gotAudio)
 	}
 }
 
