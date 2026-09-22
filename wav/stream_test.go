@@ -50,15 +50,15 @@ func TestCombineToMatchesCombineWavData(t *testing.T) {
 		{
 			name: "dataの前に任意チャンクがある",
 			parts: [][]byte{
-				insertChunkBeforeData(buildWAV(defaultSpec([]byte{1, 2, 3})), "LIST", []byte("abcdef")),
-				buildWAV(defaultSpec([]byte{4, 5})),
+				insertChunkBeforeData(buildWAV(defaultSpec([]byte{1, 2, 3, 4})), "LIST", []byte("abcdef")),
+				buildWAV(defaultSpec([]byte{5, 6})),
 			},
 		},
 		{
 			name: "奇数サイズのチャンクがある",
 			parts: [][]byte{
-				insertChunkBeforeData(buildWAV(defaultSpec([]byte{1, 2, 3})), "LIST", []byte("abcde")),
-				buildWAV(defaultSpec([]byte{4, 5})),
+				insertChunkBeforeData(buildWAV(defaultSpec([]byte{1, 2, 3, 4})), "LIST", []byte("abcde")),
+				buildWAV(defaultSpec([]byte{5, 6})),
 			},
 		},
 		{

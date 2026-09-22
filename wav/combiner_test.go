@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"io"
 	"math"
 	"strings"
 	"testing"
@@ -11,8 +12,8 @@ import (
 )
 
 func TestCombineWavDataConcatenatesAudioPayloads(t *testing.T) {
-	first := buildWAV(defaultSpec([]byte{1, 2, 3}))
-	second := buildWAV(defaultSpec([]byte{4, 5}))
+	first := buildWAV(defaultSpec([]byte{1, 2, 3, 4}))
+	second := buildWAV(defaultSpec([]byte{5, 6, 7}))
 
 	combined, err := CombineWavData([][]byte{first, second})
 	if err != nil {
@@ -28,9 +29,9 @@ func TestCombineWavDataConcatenatesAudioPayloads(t *testing.T) {
 	if len(combined) < standardHeaderSize {
 		t.Fatalf("combined wav is too short: %d bytes", len(combined))
 	}
-	gotAudio := combined[len(combined)-5:]
-	wantAudio := []byte{1, 2, 3, 4, 5}
-	dataSize := binary.LittleEndian.Uint32(combined[len(combined)-5-4 : len(combined)-5])
+	gotAudio := combined[len(combined)-7:]
+	wantAudio := []byte{1, 2, 3, 4, 5, 6, 7}
+	dataSize := binary.LittleEndian.Uint32(combined[len(combined)-7-4 : len(combined)-7])
 	expectedSize := uint32(len(wantAudio))
 	if dataSize != expectedSize {
 		t.Fatalf("data size = %d, want %d", dataSize, expectedSize)
@@ -277,4 +278,36 @@ func TestBuildCombinedHeaderRejectsOversizedResult(t *testing.T) {
 	if tooLarge.Size <= math.MaxUint32 {
 		t.Errorf("Size = %d, want > %d", tooLarge.Size, uint64(math.MaxUint32))
 	}
+}
+
+// TestCombineRejectsMisalignedIntermediateInput は、途中の入力の data 長がブロック境界の倍数で
+// ないときに結合を拒むことを確認します。デコードせずに連結するため、そのまま繋ぐと後続の
+// 全サンプルが 1 バイトずれて轟音になります。最後の入力は後ろに何も続かないので通します。
+func TestCombineRejectsMisalignedIntermediateInput(t *testing.T) {
+	// 16bit モノラルで 3 バイト = 1.5 サンプル。
+	misaligned := buildWAV(defaultSpec([]byte{1, 2, 3}))
+	aligned := buildWAV(defaultSpec([]byte{4, 5, 6, 7}))
+
+	t.Run("途中の入力は拒む", func(t *testing.T) {
+		_, err := CombineWavData([][]byte{misaligned, aligned})
+		var headerErr *ErrInvalidWAVHeader
+		if !errors.As(err, &headerErr) {
+			t.Fatalf("CombineWavData() error = %v, want *ErrInvalidWAVHeader", err)
+		}
+		if headerErr.Index != 0 {
+			t.Errorf("Index = %d, want 0（ずれの原因になった入力）", headerErr.Index)
+		}
+		if err := CombineTo(io.Discard, readSeekers(misaligned, aligned)); !errors.As(err, &headerErr) {
+			t.Errorf("CombineTo() error = %v, want *ErrInvalidWAVHeader", err)
+		}
+	})
+
+	t.Run("最後の入力は通す", func(t *testing.T) {
+		if _, err := CombineWavData([][]byte{aligned, misaligned}); err != nil {
+			t.Errorf("CombineWavData() error = %v, want nil", err)
+		}
+		if err := CombineTo(io.Discard, readSeekers(aligned, misaligned)); err != nil {
+			t.Errorf("CombineTo() error = %v, want nil", err)
+		}
+	})
 }

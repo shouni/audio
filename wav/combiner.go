@@ -6,7 +6,10 @@
 // フォーマットと再生時間を返します。
 package wav
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // CombineOption は結合の動作を調整する関数です。
 type CombineOption func(*combineConfig)
@@ -69,7 +72,9 @@ func (c combineConfig) silence(format Format) []byte {
 // 最終的なバッファ構築時に一度だけコピーを行います。
 //
 // 出力ヘッダーには先頭ファイルの fmt チャンクをそのまま使うため、フォーマットの
-// 揃っていないファイルを渡すと *ErrMismatchedWAVFormat を返します。
+// 揃っていないファイルを渡すと *ErrMismatchedWAVFormat を返します。最後以外の入力の
+// data 長がブロック境界（全チャンネル分の 1 サンプル）の倍数でない場合も、そのまま繋ぐと
+// 後続のサンプルがずれるため *ErrInvalidWAVHeader を返します。
 //
 // 入力をすべてメモリに載せるので、長尺の結合には CombineTo の方が向きます。
 func CombineWavData(wavDataList [][]byte, opts ...CombineOption) ([]byte, error) {
@@ -91,6 +96,7 @@ func CombineWavData(wavDataList [][]byte, opts ...CombineOption) ([]byte, error)
 	extractedAudio = append(extractedAudio, first.audioData)
 	totalAudioSize := uint64(len(first.audioData))
 
+	previous := first
 	for i := 1; i < len(wavDataList); i++ {
 		current, err := extractAudioData(wavDataList[i], i)
 		if err != nil {
@@ -101,15 +107,38 @@ func CombineWavData(wavDataList [][]byte, opts ...CombineOption) ([]byte, error)
 		if err := verifySameFormat(first.format, current.format, i); err != nil {
 			return nil, err
 		}
+		if err := verifyBlockAligned(previous.format, int64(len(previous.audioData)), i-1); err != nil {
+			return nil, err
+		}
 		if len(silence) > 0 {
 			extractedAudio = append(extractedAudio, silence)
 			totalAudioSize += uint64(len(silence))
 		}
 		extractedAudio = append(extractedAudio, current.audioData)
 		totalAudioSize += uint64(len(current.audioData))
+		previous = current
 	}
 
 	return buildCombinedWav(first, extractedAudio, totalAudioSize)
+}
+
+// verifyBlockAligned は、後ろに別の入力が続く WAV の data 長がブロック境界（全チャンネル分の
+// 1 サンプル）の倍数であることを確認します。
+//
+// 結合はデコードせず data を連結するだけなので、途中の入力が 1 サンプルの途中で切れていると、
+// 後続の全サンプルがその分だけずれて読まれ、無音ではなく轟音になります。最後の入力は
+// 後ろに何も続かないので対象外です（末尾の欠けたサンプルはデコーダが読み捨てます）。
+// blockAlign が 0 になるフォーマット（8 ビット未満）は判定できないので通します。
+func verifyBlockAligned(format Format, dataSize int64, index int) error {
+	blockAlign := int64(format.blockAlign())
+	if blockAlign == 0 || dataSize%blockAlign == 0 {
+		return nil
+	}
+	return &ErrInvalidWAVHeader{
+		Index: index,
+		Details: fmt.Sprintf("dataチャンクの長さ (%dバイト) がブロック境界 (%dバイト) の倍数ではありません。後続のサンプルがずれるため結合できません",
+			dataSize, blockAlign),
+	}
 }
 
 // verifySameFormat は、結合対象のフォーマットが先頭ファイルと一致することを確認します。

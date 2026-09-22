@@ -356,10 +356,20 @@ type counter struct {
 	// この変化は一の位で決まるので、14人もジュウヨニンになります。値ごとの irregular では
 	// 4・14・24…と際限なく並べることになるため、桁ではなく一の位で持ちます。
 	digitOverrides map[uint64]string
+	// contextual は、助数詞の直後に続く語で読みが変わる場合の判定です（1日中→イチニチチュウ）。
+	// following は助数詞の直後のトークンで、文末なら nil です。読みを返さなければ通常の
+	// 規則に落ちます。nil なら使いません。
+	contextual func(n numeral, following *tokenizer.Token) (string, bool)
 }
 
-// read は数と助数詞をつないだ読みを返します。
-func (c counter) read(n numeral) string {
+// read は数と助数詞をつないだ読みを返します。following は助数詞の直後のトークンで、
+// 文末なら nil です。
+func (c counter) read(n numeral, following *tokenizer.Token) string {
+	if c.contextual != nil {
+		if reading, ok := c.contextual(n, following); ok {
+			return reading
+		}
+	}
 	if n.hasValue {
 		if irregular, ok := c.irregular[n.value]; ok {
 			return irregular
@@ -399,13 +409,13 @@ var counters = map[string]counter{
 	"か月": {reading: "カゲツ", class: soundK},
 	"カ月": {reading: "カゲツ", class: soundK},
 	"箇月": {reading: "カゲツ", class: soundK},
-	"日": {reading: "ニチ", irregular: map[uint64]string{
-		1: "ツイタチ", 2: "フツカ", 3: "ミッカ", 4: "ヨッカ", 5: "イツカ",
-		6: "ムイカ", 7: "ナノカ", 8: "ヨウカ", 9: "ココノカ", 10: "トオカ",
-		14: "ジュウヨッカ", 20: "ハツカ", 24: "ニジュウヨッカ",
-	}},
-	"時":  {reading: "ジ", digitOverrides: map[uint64]string{4: "ヨ", 7: "シチ", 9: "ク"}},
-	"時間": {reading: "ジカン", digitOverrides: map[uint64]string{4: "ヨ"}},
+	"日":  {reading: "ニチ", irregular: dayReadings, contextual: readFirstDayAsDuration},
+	// 「日間」「分間」は形態素解析器が 1 トークンにするため、「日」「分」の項目では拾えません。
+	"日間": {reading: "ニチカン", irregular: dayDurationReadings()},
+	"分間": {reading: "フンカン", class: soundPYon},
+	// 0時 は ゼロジ ではなく レイジ（時報や時刻表の読み）。
+	"時":  {reading: "ジ", digitOverrides: map[uint64]string{4: "ヨ", 7: "シチ", 9: "ク"}, irregular: map[uint64]string{0: "レイジ"}},
+	"時間": {reading: "ジカン", digitOverrides: map[uint64]string{4: "ヨ", 9: "ク"}},
 	"分":  {reading: "フン", class: soundPYon},
 	"円":  {reading: "エン", digitOverrides: map[uint64]string{4: "ヨ"}},
 	"週":  {reading: "シュウ", class: soundS},
@@ -436,13 +446,18 @@ var counters = map[string]counter{
 	"階": {reading: "カイ", class: soundKVoiced},
 
 	// サ行・タ行。
-	"冊": {reading: "サツ", class: soundS},
-	"隻": {reading: "セキ", class: soundS},
-	"足": {reading: "ソク", class: soundS},
-	"周": {reading: "シュウ", class: soundS},
-	"点": {reading: "テン", class: soundT},
-	"通": {reading: "ツウ", class: soundT},
-	"着": {reading: "チャク", class: soundT},
+	"冊":  {reading: "サツ", class: soundS},
+	"隻":  {reading: "セキ", class: soundS},
+	"足":  {reading: "ソク", class: soundS},
+	"周":  {reading: "シュウ", class: soundS},
+	"社":  {reading: "シャ", class: soundS},
+	"章":  {reading: "ショウ", class: soundS},
+	"種":  {reading: "シュ", class: soundS},
+	"種類": {reading: "シュルイ", class: soundS},
+	"点":  {reading: "テン", class: soundT},
+	"通":  {reading: "ツウ", class: soundT},
+	"着":  {reading: "チャク", class: soundT},
+	"体":  {reading: "タイ", class: soundT},
 
 	// ハ行。促音便に加えて連濁・半濁音化が起きます。三で濁るか半濁るかは助数詞ごとに違い、
 	// 三本サンボン・三杯サンバイに対して三発サンパツ・三泊サンパクになります。
@@ -488,6 +503,45 @@ var counters = map[string]counter{
 	// 記号。半角の % は辞書が読みを持たないため、数の後ろでだけ読みを与えます
 	// （全角の ％ は辞書が読めるので不要）。
 	"%": {reading: "パーセント"},
+}
+
+// dayReadings は日付の特殊読みです。1 日〜10 日と 14・20・24 日は数の読みから作れません。
+var dayReadings = map[uint64]string{
+	1: "ツイタチ", 2: "フツカ", 3: "ミッカ", 4: "ヨッカ", 5: "イツカ",
+	6: "ムイカ", 7: "ナノカ", 8: "ヨウカ", 9: "ココノカ", 10: "トオカ",
+	14: "ジュウヨッカ", 20: "ハツカ", 24: "ニジュウヨッカ",
+}
+
+// dayDurationReadings は「N日間」の読みです。日付の特殊読みに カン を付けますが、
+// 1 日間だけは ツイタチカン ではなく イチニチカン です（ツイタチ は日付専用の読み）。
+func dayDurationReadings() map[uint64]string {
+	readings := make(map[uint64]string, len(dayReadings))
+	for value, reading := range dayReadings {
+		readings[value] = reading + "カン"
+	}
+	readings[1] = "イチニチカン"
+	return readings
+}
+
+// durationSuffixes は、「1日」の直後に来ると日付ではなく期間（イチニチ）を表す語です。
+var durationSuffixes = map[string]bool{
+	"中": true, "目": true, "間": true, "後": true, "前": true, "半": true,
+	"おき": true, "置き": true, "あたり": true, "当たり": true, "当り": true,
+	"ごと": true, "毎": true, "以内": true, "以上": true, "以下": true, "分": true,
+}
+
+// readFirstDayAsDuration は、「1日」が日付（ツイタチ）ではなく期間（イチニチ）を表す文脈を
+// 見分けます。単独の「1日」や「8月1日」は日付なのでツイタチのままにし、直後に期間を表す語
+// （1日中、1日目、1日おき）か数（1日3回）が続くときだけイチニチと読みます。
+// 漢数字の「一日」は辞書が 1 語で読むのでここへは来ません（読み上書き側で守っています）。
+func readFirstDayAsDuration(n numeral, following *tokenizer.Token) (string, bool) {
+	if !n.hasValue || n.value != 1 || following == nil {
+		return "", false
+	}
+	if durationSuffixes[following.Surface] || isDigitToken(*following) {
+		return "イチニチ", true
+	}
+	return "", false
 }
 
 // monthReadings は 1 月〜12 月の読みです。4 月シガツ・7 月シチガツ・9 月クガツ は、
@@ -545,7 +599,11 @@ func readWithCounter(number numeral, key string, tokens []tokenizer.Token, end, 
 	for next < len(tokens) && tokens[next].Position < counterEnd {
 		next++
 	}
-	return counters[key].read(number), next, true
+	var following *tokenizer.Token
+	if next < len(tokens) {
+		following = &tokens[next]
+	}
+	return counters[key].read(number, following), next, true
 }
 
 // kanjiDigitValues は漢数字の一桁の値、kanjiUnitValues は位取りの漢字の値です。
@@ -677,9 +735,12 @@ func scanDigits(tokens []tokenizer.Token, i int) (digits string, end, next int) 
 		switch {
 		// 桁区切りのカンマは、直後がちょうど3桁のときだけ数の一部とみなす。
 		// そうしないと "1,2月" のような並列の読点まで飲み込んでしまう。
-		case isSeparator(tokens[next], ",", "，") && followedByDigits(tokens, next, 3):
-			appendDigits(next + 1)
-			next += 2
+		// 全角数字は形態素解析器が 1 文字ずつのトークンにするため、桁数は
+		// 続く数字トークンをまとめて数える。
+		case isSeparator(tokens[next], ",", "，") && digitRunAfter(tokens, next) == 3:
+			for next++; next < len(tokens) && isDigitToken(tokens[next]); next++ {
+				appendDigits(next)
+			}
 		case !hasFraction && isSeparator(tokens[next], ".", "．") && followedByDigits(tokens, next, 0):
 			hasFraction = true
 			sb.WriteString(".")
@@ -702,6 +763,16 @@ func followedByDigits(tokens []tokenizer.Token, i, digitCount int) bool {
 		return false
 	}
 	return digitCount == 0 || utf8.RuneCountInString(tokens[i+1].Surface) == digitCount
+}
+
+// digitRunAfter は、tokens[i] の後ろに連続する数字トークンの合計桁数を返します。
+// 半角の "234" は 1 トークン 3 桁、全角の "２３４" は 3 トークン 1 桁ずつで、どちらも 3 です。
+func digitRunAfter(tokens []tokenizer.Token, i int) int {
+	digits := 0
+	for j := i + 1; j < len(tokens) && isDigitToken(tokens[j]); j++ {
+		digits += utf8.RuneCountInString(tokens[j].Surface)
+	}
+	return digits
 }
 
 // isSeparator は、トークンが指定した区切り文字のいずれかかを判定します。

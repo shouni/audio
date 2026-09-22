@@ -44,6 +44,9 @@ func CombineTo(w io.Writer, sources []io.ReadSeeker, opts ...CombineOption) erro
 			if err := verifySameFormat(parts[0].format, part.format, i); err != nil {
 				return err
 			}
+			if err := verifyBlockAligned(parts[i-1].format, parts[i-1].dataSize, i-1); err != nil {
+				return err
+			}
 		}
 		parts[i] = part
 		totalAudioSize += uint64(part.dataSize)
