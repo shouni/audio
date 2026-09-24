@@ -197,6 +197,9 @@ func TestFormatSilenceByte(t *testing.T) {
 		{"16bit PCM", Format{AudioFormat: pcmFormatTag, BitsPerSample: 16}, 0x00},
 		{"32bit float", Format{AudioFormat: 3, BitsPerSample: 32}, 0x00},
 		{"拡張形式の8bit PCM", Format{AudioFormat: extensibleFormatTag, BitsPerSample: 8, SubFormat: subFormatPCM}, 0x80},
+		// G.711 は符号化の規則そのものが違うので、0x00 を書くと無音ではなく雑音になる。
+		{"μ-law", Format{AudioFormat: muLawFormatTag, BitsPerSample: 8}, 0xFF},
+		{"A-law", Format{AudioFormat: aLawFormatTag, BitsPerSample: 8}, 0xD5},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

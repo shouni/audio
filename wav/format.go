@@ -56,17 +56,36 @@ func (f Format) blockAlign() uint32 {
 
 // silenceByte は無音を表すバイト値を返します。
 //
-// 8bit のリニア PCM だけは符号なし (0〜255 の中央が無音) なので 0x80 になります。
-// 16bit 以上の整数 PCM と IEEE float はいずれも符号付きで、無音は 0x00 です。
+// 符号化方式ごとに「振幅ゼロ」を表すバイトが違います。0x00 で埋めてよいのは符号付きの
+// 形式だけで、それ以外に 0x00 を書くと無音ではなく雑音になります。
+//
+//   - 8bit のリニア PCM は符号なし (0〜255 の中央が無音) なので 0x80。
+//   - μ-law は符号ビットと振幅を反転して格納するため 0xFF。
+//   - A-law は偶数ビットを反転する規則 (0x55 との XOR) があるため 0xD5。
+//   - 16bit 以上の整数 PCM と IEEE float は符号付きなので 0x00。
 func (f Format) silenceByte() byte {
-	if f.AudioFormatTag() == pcmFormatTag && f.BitsPerSample == 8 {
-		return 0x80
+	switch f.AudioFormatTag() {
+	case pcmFormatTag:
+		if f.BitsPerSample == 8 {
+			return 0x80
+		}
+	case muLawFormatTag:
+		return 0xFF
+	case aLawFormatTag:
+		return 0xD5
 	}
 	return 0x00
 }
 
-// pcmFormatTag はリニア PCM を表す AudioFormat の値です。
-const pcmFormatTag = 1
+// 符号化方式を表す AudioFormat の値です（WAVE_FORMAT_*）。
+const (
+	// pcmFormatTag はリニア PCM です。
+	pcmFormatTag = 1
+	// aLawFormatTag は G.711 A-law です。
+	aLawFormatTag = 6
+	// muLawFormatTag は G.711 μ-law です。
+	muLawFormatTag = 7
+)
 
 // formatGUID は 16 バイトのサブフォーマット GUID を正準表記の文字列にします。
 // 先頭 3 グループはリトルエンディアン、残り 2 グループはバイト順のままです。
