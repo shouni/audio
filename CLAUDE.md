@@ -39,6 +39,8 @@ Per-function rationale lives in the doc comments (`wav/header.go`, `wav/combiner
 
 Callers wanting to mix formats must resample first. Do not "fix" a mismatch by relaxing the comparison.
 
+**The gap `WithGap` inserts is not a run of zero bytes.** Which byte means "amplitude zero" depends on the encoding, and `silenceByte` is the one place that knows: 0x80 for 8-bit linear PCM (unsigned, so the midpoint is silence), 0xFF for G.711 μ-law and 0xD5 for A-law (both store the sign and magnitude inverted, μ-law over all bits and A-law over the even ones), 0x00 only for signed integer PCM and IEEE float. Writing 0x00 into a μ-law stream inserts noise at full scale, not silence. `AudioFormatTag` is what the switch reads, so `WAVE_FORMAT_EXTENSIBLE` resolves through its sub-format GUID and needs no separate case.
+
 ### The two combine paths must stay indistinguishable
 
 `CombineWavData` (bytes in, bytes out) and `CombineTo` (`io.ReadSeeker` → `io.Writer`) differ only in memory use: the streaming path's footprint is independent of the audio's length and of how many parts there are. Their validation, their errors, and their output bytes are required to be identical, and `FuzzCombineToMatchesCombineWavData` pins exactly that — if one path accepts an input the other rejects, the result would depend on which API a caller happened to pick. Both paths scan through the same `scanWAV` over a `chunkSource` (bytes or `io.ReadSeeker`), so a divergence can only be introduced after scanning. `chunkSource` is a struct rather than an interface on purpose: an interface method call makes its arguments escape, and `Inspect` is meant to run without allocating.
