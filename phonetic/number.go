@@ -290,7 +290,7 @@ func soundChange(kind tailKind, class soundClass) (geminate bool, voice voicing)
 			return true, voicingSemi // 一本イッポン 六本ロッポン 百本ヒャッポン
 		}
 		if kind == tailThree || kind == tailThousand || kind == tailMan {
-			return false, voicingFull // 三本サンボン 千本センボン 万本マンボン
+			return false, voicingFull // 三本サンボン 千本センボン 一万本イチマンボン
 		}
 		return false, voicingNone
 	case soundP, soundPYon:
@@ -298,7 +298,7 @@ func soundChange(kind tailKind, class soundClass) (geminate bool, voice voicing)
 			return true, voicingSemi // 一発イッパツ 六発ロッパツ 十分ジュップン
 		}
 		if kind == tailThree || kind == tailThousand || kind == tailMan {
-			return false, voicingSemi // 三発サンパツ 千発センパツ 万発マンパツ
+			return false, voicingSemi // 三発サンパツ 千発センパツ 一万発イチマンパツ
 		}
 		if kind == tailFour && class == soundPYon {
 			return false, voicingSemi // 四分ヨンプン。四発はヨンハツのまま。
