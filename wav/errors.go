@@ -70,6 +70,32 @@ func (e *ErrMismatchedSubFormat) Error() string {
 		e.Index, formatGUID(e.Got), formatGUID(e.First))
 }
 
+// ErrUnsupportedWAVFormat は、デコードせずに繋げない形式の WAV が渡された場合に発生します。
+//
+// 対応するのはリニア PCM（8 の倍数のビット数）、IEEE float（32/64 ビット）、
+// G.711 A-law / μ-law（8 ビット）と、それぞれの WAVE_FORMAT_EXTENSIBLE です。
+// ADPCM や MP3 を格納した WAV などの圧縮形式は、PCM に変換してから渡してください。
+type ErrUnsupportedWAVFormat struct {
+	// Index は対応外の WAV ファイルのインデックスです。
+	// Inspect のように一覧に属さない検証では -1 になります。
+	Index int
+	// Format は読み取ったフォーマットです。
+	Format Format
+}
+
+func (e *ErrUnsupportedWAVFormat) Error() string {
+	encoding := fmt.Sprintf("符号化方式 %#04x", e.Format.AudioFormat)
+	if e.Format.AudioFormat == extensibleFormatTag {
+		encoding = "サブフォーマット " + formatGUID(e.Format.SubFormat)
+	}
+	target := "WAVファイル"
+	if e.Index >= 0 {
+		target = fmt.Sprintf("WAVファイル #%d", e.Index)
+	}
+	return fmt.Sprintf("%s は対応していない形式です (%s、%dビット)。デコードなしの結合はリニアPCM・IEEE float・A-law・μ-lawだけが対象です。PCMに変換してから渡してください",
+		target, encoding, e.Format.BitsPerSample)
+}
+
 // ErrWAVTooLarge は、結合結果が RIFF の表現できる上限 (4GB) を超える場合に発生します。
 //
 // RIFF チャンクサイズと data チャンクサイズはどちらも 32bit なので、これを超えたファイルは

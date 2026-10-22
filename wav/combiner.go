@@ -72,7 +72,8 @@ func (c combineConfig) silence(format Format) []byte {
 // 最終的なバッファ構築時に一度だけコピーを行います。
 //
 // 出力ヘッダーには先頭ファイルの fmt チャンクをそのまま使うため、フォーマットの
-// 揃っていないファイルを渡すと *ErrMismatchedWAVFormat を返します。最後以外の入力の
+// 揃っていないファイルを渡すと *ErrMismatchedWAVFormat を返します。ADPCM などの
+// 圧縮形式は繋いでも正しい WAV になる保証がないため *ErrUnsupportedWAVFormat を返します。最後以外の入力の
 // data 長がブロック境界（全チャンネル分の 1 サンプル）の倍数でない場合も、そのまま繋ぐと
 // 後続のサンプルがずれるため *ErrInvalidWAVHeader を返します。
 //
@@ -152,6 +153,10 @@ func verifySameFormat(first, current Format, index int) error {
 		return mismatchedFormat(index, "サンプルレート", first.SampleRate, current.SampleRate)
 	case first.BitsPerSample != current.BitsPerSample:
 		return mismatchedFormat(index, "量子化ビット数", uint32(first.BitsPerSample), uint32(current.BitsPerSample))
+	case first.ValidBitsPerSample != current.ValidBitsPerSample:
+		// 箱の大きさが同じならバイトはずれないが、結合後のヘッダーは先頭ファイルの値を
+		// 名乗るので、2 本目以降の下位ビットを捨てて読むソフトがある。
+		return mismatchedFormat(index, "有効ビット数", uint32(first.ValidBitsPerSample), uint32(current.ValidBitsPerSample))
 	case first.ChannelMask != current.ChannelMask:
 		return mismatchedFormat(index, "チャンネルマスク", first.ChannelMask, current.ChannelMask)
 	case first.SubFormat != current.SubFormat:

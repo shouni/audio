@@ -256,7 +256,7 @@ func parseFormatPayload(payload []byte, declaredSize uint32, index int) (Format,
 		BitsPerSample: binary.LittleEndian.Uint16(payload[14:]),
 	}
 	if format.AudioFormat != extensibleFormatTag {
-		return format, nil
+		return format, format.verifySupported(index)
 	}
 
 	if uint64(declaredSize) < extensibleFormatChunkSize || len(payload) < extensibleFormatChunkSize {
@@ -265,9 +265,17 @@ func parseFormatPayload(payload []byte, declaredSize uint32, index int) (Format,
 			Details: fmt.Sprintf("拡張形式(WAVE_FORMAT_EXTENSIBLE)のfmtチャンクが短すぎます (%dバイト、最低%dバイト必要)", declaredSize, extensibleFormatChunkSize),
 		}
 	}
+	format.ValidBitsPerSample = binary.LittleEndian.Uint16(payload[18:])
 	format.ChannelMask = binary.LittleEndian.Uint32(payload[20:])
 	copy(format.SubFormat[:], payload[24:extensibleFormatChunkSize])
-	return format, nil
+	// 有効ビットは箱の上位に詰めて格納するので、箱より大きい値はありえない。
+	if format.ValidBitsPerSample > format.BitsPerSample {
+		return Format{}, &ErrInvalidWAVHeader{
+			Index:   index,
+			Details: fmt.Sprintf("有効ビット数 (%d) が量子化ビット数 (%d) を超えています", format.ValidBitsPerSample, format.BitsPerSample),
+		}
+	}
+	return format, format.verifySupported(index)
 }
 
 // nextChunkOffset は WAV チャンクのパディングを考慮して次のチャンク位置を返します。

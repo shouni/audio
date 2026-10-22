@@ -222,42 +222,32 @@ func TestCombineWavDataUpdatesFactChunk(t *testing.T) {
 // TestCombineWavDataLeavesUnusableFactChunk は、サンプル数を書ける形をしていない
 // fact チャンクには手を付けないことを確認します。
 func TestCombineWavDataLeavesUnusableFactChunk(t *testing.T) {
-	// 4bit はブロックアラインが 0 バイトになり、サンプル数を求められない。
-	fourBit := func(audio []byte) wavSpec {
-		return wavSpec{audioFormat: 1, numChannels: 1, sampleRate: 24000, bitsPerSample: 4, audio: audio}
+	parts := [][]byte{
+		insertChunkBeforeData(buildWAV(defaultSpec([]byte{1, 2, 3, 4})), "fact", []byte{2, 0}),
+		buildWAV(defaultSpec([]byte{5, 6})),
 	}
+	combined, err := CombineWavData(parts)
+	if err != nil {
+		t.Fatalf("CombineWavData() error = %v", err)
+	}
+	got := factPayloadPrefix(t, combined)
+	want := factPayloadPrefix(t, parts[0])
+	if !bytes.Equal(got, want) {
+		t.Errorf("fact のペイロード = %v, want %v (変更されないこと)", got, want)
+	}
+}
 
-	tests := []struct {
-		name  string
-		parts [][]byte
-	}{
-		{
-			name: "ペイロードが4バイト未満",
-			parts: [][]byte{
-				insertChunkBeforeData(buildWAV(defaultSpec([]byte{1, 2, 3, 4})), "fact", []byte{2, 0}),
-				buildWAV(defaultSpec([]byte{5, 6})),
-			},
-		},
-		{
-			name: "ブロックアラインが0",
-			parts: [][]byte{
-				insertChunkBeforeData(buildWAV(fourBit([]byte{1, 2, 3, 4})), "fact", factChunk(2)),
-				buildWAV(fourBit([]byte{5, 6})),
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			combined, err := CombineWavData(tt.parts)
-			if err != nil {
-				t.Fatalf("CombineWavData() error = %v", err)
-			}
-			got := factPayloadPrefix(t, combined)
-			want := factPayloadPrefix(t, tt.parts[0])
-			if !bytes.Equal(got, want) {
-				t.Errorf("fact のペイロード = %v, want %v (変更されないこと)", got, want)
-			}
-		})
+// TestUpdateFactChunkSkipsZeroBlockAlign は、ブロックアラインが 0 になるフォーマットでは
+// サンプル数を求められないので fact チャンクに手を付けないことを確認します。
+// 4 ビットの形式は解析の時点で弾くため、ヘッダーの書き換えを直接呼びます。
+func TestUpdateFactChunkSkipsZeroBlockAlign(t *testing.T) {
+	wavBytes := insertChunkBeforeData(buildWAV(defaultSpec(nil)), "fact", factChunk(2))
+	header := wavBytes[:len(wavBytes)-chunkHeaderSize]
+	want := bytes.Clone(header)
+
+	updateFactChunk(header, Format{NumChannels: 1, BitsPerSample: 4}, 100)
+	if !bytes.Equal(header, want) {
+		t.Errorf("ヘッダー = %v, want %v (変更されないこと)", header, want)
 	}
 }
 

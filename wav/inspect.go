@@ -25,6 +25,7 @@ func (i Info) Duration() time.Duration {
 // Inspect は WAV バイナリを解析し、フォーマットと音声データの概要を返します。
 // CombineWavData と同じ検証 (RIFF/WAVE 識別子、fmt/data チャンクの存在とサイズ) を
 // 行うため、結合前の事前チェックや再生時間の見積もりに使えます。
+// ADPCM などデコードせずに繋げない形式は *ErrUnsupportedWAVFormat を返します。
 func Inspect(wavBytes []byte) (Info, error) {
 	parts, err := extractAudioData(wavBytes, -1)
 	if err != nil {

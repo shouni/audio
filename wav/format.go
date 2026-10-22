@@ -15,7 +15,12 @@ type Format struct {
 	// SampleRate は1秒あたりのサンプル数 (Hz) です。
 	SampleRate uint32
 	// BitsPerSample は1サンプルあたりのビット数です。
+	// 拡張形式では、1サンプルを格納する箱の大きさを表します。
 	BitsPerSample uint16
+	// ValidBitsPerSample は BitsPerSample のうち実際に意味を持つビット数です
+	// (例: 32 ビットの箱に 24 ビットの音を入れる)。
+	// WAVE_FORMAT_EXTENSIBLE のときだけ値を持ち、それ以外の形式では 0 です。
+	ValidBitsPerSample uint16
 	// ChannelMask は各チャンネルのスピーカー配置を表すビットマスクです。
 	// WAVE_FORMAT_EXTENSIBLE のときだけ値を持ち、それ以外の形式では 0 です。
 	ChannelMask uint32
@@ -81,11 +86,44 @@ func (f Format) silenceByte() byte {
 const (
 	// pcmFormatTag はリニア PCM です。
 	pcmFormatTag = 1
+	// floatFormatTag は IEEE float です。
+	floatFormatTag = 3
 	// aLawFormatTag は G.711 A-law です。
 	aLawFormatTag = 6
 	// muLawFormatTag は G.711 μ-law です。
 	muLawFormatTag = 7
 )
+
+// subFormatGUIDSuffix は標準のサブフォーマット GUID (KSDATAFORMAT_SUBTYPE_*) に共通する
+// 後半 12 バイトです。先頭 4 バイトのうち下位 2 バイトが符号化方式、上位 2 バイトは 0 です。
+var subFormatGUIDSuffix = [12]byte{0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71}
+
+// verifySupported は、デコードせずに繋げる形式かどうかを確認します。
+//
+// 対応するのは、1 サンプルのバイト数が量子化ビット数とチャンネル数だけで決まり、
+// 無音を表すバイトが分かる形式（リニア PCM、IEEE float、G.711 A-law / μ-law）です。
+// ADPCM や MP3 を格納した WAV などの圧縮形式は、ブロック境界も無音も量子化ビット数からは
+// 決まらないため、繋いでも正しい WAV になる保証がありません。
+func (f Format) verifySupported(index int) error {
+	if f.AudioFormat == extensibleFormatTag &&
+		(binary.LittleEndian.Uint16(f.SubFormat[2:4]) != 0 || [12]byte(f.SubFormat[4:]) != subFormatGUIDSuffix) {
+		return &ErrUnsupportedWAVFormat{Index: index, Format: f}
+	}
+
+	var supported bool
+	switch f.AudioFormatTag() {
+	case pcmFormatTag:
+		supported = f.BitsPerSample > 0 && f.BitsPerSample%8 == 0
+	case floatFormatTag:
+		supported = f.BitsPerSample == 32 || f.BitsPerSample == 64
+	case aLawFormatTag, muLawFormatTag:
+		supported = f.BitsPerSample == 8
+	}
+	if !supported {
+		return &ErrUnsupportedWAVFormat{Index: index, Format: f}
+	}
+	return nil
+}
 
 // formatGUID は 16 バイトのサブフォーマット GUID を正準表記の文字列にします。
 // 先頭 3 グループはリトルエンディアン、残り 2 グループはバイト順のままです。
