@@ -68,8 +68,10 @@ func TestCombineWavDataRejectsMismatchedFormat(t *testing.T) {
 			wantField: "量子化ビット数",
 		},
 		{
-			name:      "フォーマット種別違い",
-			mutate:    func(s *wavSpec) { s.audioFormat = 3 },
+			name: "フォーマット種別違い",
+			// float は 32/64 ビットだけが対応形式なので、ビット数も合わせて変える。
+			// AudioFormat を先に比べるため、食い違いはフォーマット種別として報告される。
+			mutate:    func(s *wavSpec) { s.audioFormat = floatFormatTag; s.bitsPerSample = 32 },
 			wantField: "フォーマット種別",
 		},
 	}

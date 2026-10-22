@@ -23,7 +23,7 @@
 *   **Dynamic Chunk Analysis**: RIFF/WAVE 構造を動的に解析し、`fmt` や `data` チャンクを正確に特定。メタデータが含まれる複雑なファイルにも対応。
 *   **Format Inspection**: `Inspect` により、結合せずに WAV のフォーマット・データサイズ・再生時間を取得可能。
 *   **Memory Efficient**: 最終的なバッファサイズを事前に計算し、最小限のアロケーションで高速に処理。
-*   **Production Ready**: フォーマット不一致の検出（WAVE_FORMAT_EXTENSIBLE のサブフォーマット GUID まで比較）、4GB 超過チェック、不正なヘッダーに対する厳密なバリデーションを標準装備。
+*   **Production Ready**: フォーマット不一致の検出（WAVE_FORMAT_EXTENSIBLE の有効ビット数とサブフォーマット GUID まで比較）、圧縮形式の拒否、4GB 超過チェック、不正なヘッダーに対する厳密なバリデーションを標準装備。
 
 ## 🚦 使い方 (Usage)
 
@@ -149,6 +149,8 @@ func main() {
 
 結合はデコードを伴わず `data` チャンクのバイト列を連結するだけで、出力ヘッダーには先頭ファイルの `fmt` チャンクをそのまま使います。 `fact` チャンクがあればサンプル数だけを結合後の値に書き換え、それ以外の付随チャンクは先頭ファイルのものがそのまま残ります。そのため、フォーマット種別・チャンネル数・サンプルレート・量子化ビット数のいずれかが食い違うファイルを渡すと `*wav.ErrMismatchedWAVFormat` を返します。
 
+対応する形式は、リニア PCM（8 の倍数のビット数）、IEEE float（32/64 ビット）、G.711 A-law / μ-law（8 ビット）と、それぞれの WAVE_FORMAT_EXTENSIBLE です。ADPCM や MP3 を格納した WAV などの圧縮形式は、ブロック境界も無音も量子化ビット数からは決まらないため `*wav.ErrUnsupportedWAVFormat` を返します。PCM に変換してから渡してください。
+
 ```go
 combined, err := wav.CombineWavData(wavParts)
 if mismatch, ok := errors.AsType[*wav.ErrMismatchedWAVFormat](err); ok {
@@ -160,7 +162,7 @@ if mismatch, ok := errors.AsType[*wav.ErrMismatchedWAVFormat](err); ok {
 
 このチェックがないと、48kHz ステレオの音声が 24kHz モノラルのヘッダーで再生され、速度・音程・チャンネル割り当てがすべて狂ったまま「エラーなく」出力されます。フォーマットの異なる音声を繋ぐ場合は、事前にリサンプリングして揃えてください。
 
-WAVE_FORMAT_EXTENSIBLE（`AudioFormat` が `0xFFFE`）では、実際の符号化方式もスピーカー配置も `fmt` チャンクの先頭 16 バイトには入っていません。ここを見ないとリニア PCM と IEEE float が「どちらも `0xFFFE`」として一致扱いになるため、チャンネルマスクとサブフォーマット GUID まで比較します。GUID だけが食い違う場合は値を数値で表せないため `*wav.ErrMismatchedSubFormat` を返します。
+WAVE_FORMAT_EXTENSIBLE（`AudioFormat` が `0xFFFE`）では、実際の符号化方式もスピーカー配置も `fmt` チャンクの先頭 16 バイトには入っていません。ここを見ないとリニア PCM と IEEE float が「どちらも `0xFFFE`」として一致扱いになるため、チャンネルマスク・有効ビット数（`wValidBitsPerSample`）・サブフォーマット GUID まで比較します。GUID だけが食い違う場合は値を数値で表せないため `*wav.ErrMismatchedSubFormat` を返します。
 
 #### 無音を挟んで結合する (Gap)
 

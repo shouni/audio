@@ -10,7 +10,7 @@ import (
 // 先頭 2 バイトが実際の符号化方式で、残りは全ての標準サブタイプで共通の固定値です。
 var (
 	subFormatPCM   = subFormatGUID(pcmFormatTag)
-	subFormatFloat = subFormatGUID(3)
+	subFormatFloat = subFormatGUID(floatFormatTag)
 )
 
 func subFormatGUID(tag uint16) [16]byte {
@@ -25,6 +25,7 @@ type extensibleSpec struct {
 	numChannels   uint16
 	sampleRate    uint32
 	bitsPerSample uint16
+	validBits     uint16 // 0 のときは bitsPerSample
 	channelMask   uint32
 	subFormat     [16]byte
 	fmtChunkSize  uint32 // 0 のときは extensibleFormatChunkSize
@@ -54,7 +55,11 @@ func buildExtensibleWAV(spec extensibleSpec) []byte {
 	binary.LittleEndian.PutUint16(payload[12:], blockAlign)
 	binary.LittleEndian.PutUint16(payload[14:], spec.bitsPerSample)
 	binary.LittleEndian.PutUint16(payload[16:], 22) // cbSize
-	binary.LittleEndian.PutUint16(payload[18:], spec.bitsPerSample)
+	validBits := spec.validBits
+	if validBits == 0 {
+		validBits = spec.bitsPerSample
+	}
+	binary.LittleEndian.PutUint16(payload[18:], validBits)
 	binary.LittleEndian.PutUint32(payload[20:], spec.channelMask)
 	copy(payload[24:], spec.subFormat[:])
 
@@ -103,11 +108,14 @@ func TestInspectReadsExtensibleFormat(t *testing.T) {
 // 拡張形式では AudioFormat が常に 0xFFFE なので、GUID を見ないとリニア PCM と
 // IEEE float が「どちらも 0xFFFE」として一致扱いになり、無音やノイズになります。
 func TestCombineWavDataRejectsMismatchedSubFormat(t *testing.T) {
-	second := defaultExtensibleSpec([]byte{5, 6, 7, 8})
+	// float は 32 ビット以上しか対応形式にならないので、両方 32 ビットで揃える。
+	first := defaultExtensibleSpec([]byte{1, 2, 3, 4, 5, 6, 7, 8})
+	first.bitsPerSample = 32
+	second := first
 	second.subFormat = subFormatFloat
 
 	_, err := CombineWavData([][]byte{
-		buildExtensibleWAV(defaultExtensibleSpec([]byte{1, 2, 3, 4})),
+		buildExtensibleWAV(first),
 		buildExtensibleWAV(second),
 	})
 	if err == nil {
@@ -177,6 +185,127 @@ func TestParseFormatChunkRejectsTruncatedExtensible(t *testing.T) {
 	_, err := Inspect(buildExtensibleWAV(spec))
 	if _, ok := errors.AsType[*ErrInvalidWAVHeader](err); !ok {
 		t.Fatalf("error type = %T, want *ErrInvalidWAVHeader", err)
+	}
+}
+
+// TestCombineWavDataRejectsMismatchedValidBits は、箱の大きさが同じでも有効ビット数が
+// 違えば結合しないことを確認します。バイトはずれませんが、結合後のヘッダーは先頭ファイルの
+// 値を名乗るので、2 本目以降の下位ビットを捨てて読むソフトがあります。
+func TestCombineWavDataRejectsMismatchedValidBits(t *testing.T) {
+	first := defaultExtensibleSpec([]byte{1, 2, 3, 4, 5, 6, 7, 8})
+	first.bitsPerSample = 32
+	first.validBits = 24
+	second := first
+	second.validBits = 32
+
+	_, err := CombineWavData([][]byte{buildExtensibleWAV(first), buildExtensibleWAV(second)})
+	mismatch, ok := errors.AsType[*ErrMismatchedWAVFormat](err)
+	if !ok {
+		t.Fatalf("error type = %T, want *ErrMismatchedWAVFormat", err)
+	}
+	if mismatch.Field != "有効ビット数" || mismatch.First != 24 || mismatch.Got != 32 {
+		t.Errorf("Field/First/Got = %q/%d/%d, want 有効ビット数/24/32", mismatch.Field, mismatch.First, mismatch.Got)
+	}
+}
+
+func TestInspectReadsValidBits(t *testing.T) {
+	spec := defaultExtensibleSpec([]byte{1, 2, 3, 4, 5, 6, 7, 8})
+	spec.bitsPerSample = 32
+	spec.validBits = 24
+
+	info, err := Inspect(buildExtensibleWAV(spec))
+	if err != nil {
+		t.Fatalf("Inspect() error = %v", err)
+	}
+	if info.Format.ValidBitsPerSample != 24 {
+		t.Errorf("ValidBitsPerSample = %d, want 24", info.Format.ValidBitsPerSample)
+	}
+}
+
+func TestInspectRejectsValidBitsLargerThanContainer(t *testing.T) {
+	spec := defaultExtensibleSpec([]byte{1, 2, 3, 4})
+	spec.validBits = 24
+
+	_, err := Inspect(buildExtensibleWAV(spec))
+	if _, ok := errors.AsType[*ErrInvalidWAVHeader](err); !ok {
+		t.Fatalf("error type = %T, want *ErrInvalidWAVHeader", err)
+	}
+}
+
+// TestRejectsUnsupportedFormat は、デコードせずに繋げない形式を結合前に弾くことを確認します。
+// 圧縮形式は 1 サンプルのバイト数が量子化ビット数から決まらず、ブロック境界も無音も
+// 保証できません。
+func TestRejectsUnsupportedFormat(t *testing.T) {
+	plain := func(tag, bits uint16) []byte {
+		return buildWAV(wavSpec{audioFormat: tag, numChannels: 1, sampleRate: 24000, bitsPerSample: bits, audio: []byte{1, 2, 3, 4}})
+	}
+	extensible := func(subFormat [16]byte, bits uint16) []byte {
+		spec := defaultExtensibleSpec([]byte{1, 2, 3, 4, 5, 6, 7, 8})
+		spec.subFormat = subFormat
+		spec.bitsPerSample = bits
+		return buildExtensibleWAV(spec)
+	}
+	nonStandardGUID := subFormatPCM
+	nonStandardGUID[15] ^= 0xFF
+
+	tests := []struct {
+		name string
+		wav  []byte
+	}{
+		{"IMA ADPCM", plain(0x11, 4)},
+		{"MS ADPCM", plain(2, 4)},
+		{"MP3", plain(0x55, 0)},
+		{"4ビットPCM", plain(pcmFormatTag, 4)},
+		{"12ビットPCM", plain(pcmFormatTag, 12)},
+		{"16ビットfloat", plain(floatFormatTag, 16)},
+		{"16ビットμ-law", plain(muLawFormatTag, 16)},
+		{"拡張形式のADPCM", extensible(subFormatGUID(0x11), 16)},
+		{"拡張形式の非標準GUID", extensible(nonStandardGUID, 16)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Inspect(tt.wav)
+			unsupported, ok := errors.AsType[*ErrUnsupportedWAVFormat](err)
+			if !ok {
+				t.Fatalf("Inspect() error type = %T, want *ErrUnsupportedWAVFormat", err)
+			}
+			if unsupported.Index != -1 {
+				t.Errorf("Index = %d, want -1", unsupported.Index)
+			}
+
+			_, err = CombineWavData([][]byte{buildWAV(defaultSpec([]byte{1, 2})), tt.wav})
+			unsupported, ok = errors.AsType[*ErrUnsupportedWAVFormat](err)
+			if !ok {
+				t.Fatalf("CombineWavData() error type = %T, want *ErrUnsupportedWAVFormat", err)
+			}
+			if unsupported.Index != 1 {
+				t.Errorf("Index = %d, want 1", unsupported.Index)
+			}
+		})
+	}
+}
+
+func TestAcceptsSupportedFormat(t *testing.T) {
+	tests := []struct {
+		name string
+		spec wavSpec
+	}{
+		{"8ビットPCM", wavSpec{audioFormat: pcmFormatTag, bitsPerSample: 8}},
+		{"24ビットPCM", wavSpec{audioFormat: pcmFormatTag, bitsPerSample: 24}},
+		{"32ビットfloat", wavSpec{audioFormat: floatFormatTag, bitsPerSample: 32}},
+		{"64ビットfloat", wavSpec{audioFormat: floatFormatTag, bitsPerSample: 64}},
+		{"A-law", wavSpec{audioFormat: aLawFormatTag, bitsPerSample: 8}},
+		{"μ-law", wavSpec{audioFormat: muLawFormatTag, bitsPerSample: 8}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.spec.numChannels = 1
+			tt.spec.sampleRate = 8000
+			tt.spec.audio = make([]byte, 24)
+			if _, err := Inspect(buildWAV(tt.spec)); err != nil {
+				t.Errorf("Inspect() error = %v", err)
+			}
+		})
 	}
 }
 

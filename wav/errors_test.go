@@ -40,6 +40,16 @@ func TestErrorMessages(t *testing.T) {
 			want: []string{"#1", "サブフォーマット", "{00000003-0000-0010-8000-00AA00389B71}", "{00000001-0000-0010-8000-00AA00389B71}"},
 		},
 		{
+			name: "対応外の形式",
+			err:  &ErrUnsupportedWAVFormat{Index: 1, Format: Format{AudioFormat: 0x11, BitsPerSample: 4}},
+			want: []string{"#1", "対応していない形式", "0x0011", "4ビット", "PCMに変換してから"},
+		},
+		{
+			name: "対応外の形式（拡張形式・単体）",
+			err:  &ErrUnsupportedWAVFormat{Index: -1, Format: Format{AudioFormat: extensibleFormatTag, BitsPerSample: 16, SubFormat: subFormatGUID(0x11)}},
+			want: []string{"WAVファイル は", "{00000011-0000-0010-8000-00AA00389B71}"},
+		},
+		{
 			name: "4GB超過",
 			err:  &ErrWAVTooLarge{Size: 5_000_000_000},
 			want: []string{"4GBを超過", "5000000000", "4294967295"},
