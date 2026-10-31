@@ -62,6 +62,8 @@ Two orderings in `convertLine` are load-bearing and easy to get backwards:
 - **Tokenize the whole line once, then lay overrides on top.** Applying overrides first would cut the input into fragments that are then analysed without context, and the parts of speech come out wrong (the 「が」 in 「運命の閃光が」 is read as a conjunction rather than a particle once isolated, which drops both the particle correction and the phrase spacing).
 - **Only matches that start *and* end on a morpheme boundary count.** A match crossing a boundary drops whatever characters the override failed to cover (an override for 「世界」 against 「世界観」).
 
+**A reading the caller has already decided must be passed in katakana.** Katakana is analysed as one noun and comes back as itself, without changing the words around it. A hiragana-only word starting with へ or を is split off as a particle and gets the particle correction (`へいそうする` → エ イソウスル; in `へいわな街` the following 街 becomes ガイ). Whether a hiragana へ is a particle or the first sound of a word cannot be told from the characters, so this cannot be fixed here; `TestConverter_ConvertToReading_KeepsKatakanaReadings` pins the katakana side of the contract, which ap-music relies on when it resolves furigana.
+
 Input is also split into lines and analysed line by line, because a token at the start of a line otherwise gets dragged by the preceding line's symbols or unknown words — a real case with lyrics carrying `[Chorus]` tags.
 
 ### An override table is a list of what the dictionary gets wrong
