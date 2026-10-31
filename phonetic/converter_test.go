@@ -569,6 +569,34 @@ func TestConverter_ConvertToReading_NormalizesUnknownHiragana(t *testing.T) {
 	}
 }
 
+// 呼び出し側が読みを決めた語はカタカナで渡す、という契約を固定します（ap-music はふりがなを
+// カタカナにしてから渡す）。ひらがなで渡すと「へ」「を」が助詞として切り出されて読みが崩れ、
+// 後ろの語の読みまで変わるため、カタカナの語は読みも前後の語も変えないことを確かめます。
+func TestConverter_ConvertToReading_KeepsKatakanaReadings(t *testing.T) {
+	converter, err := NewConverter()
+	if err != nil {
+		t.Fatalf("failed to create converter: %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "ヘ で始まる語", input: "流れる星とヘイソウする", want: "ナガレルホシトヘイソウスル"},
+		{name: "後ろの語の読みも変えない", input: "ヘイワな街", want: "ヘイワナマチ"},
+		{name: "助詞の直後", input: "君はヘイキだと言った", want: "キミワヘイキダトイッタ"},
+		{name: "ヲ で始まる語", input: "ヲトメの祈り", want: "ヲトメノイノリ"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := converter.ConvertToReading(tt.input); got != tt.want {
+				t.Errorf("ConvertToReading(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestConverter_WithoutDefaultReadingOverrides(t *testing.T) {
 	withDefaults, err := NewConverter()
 	if err != nil {
