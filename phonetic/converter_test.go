@@ -569,7 +569,7 @@ func TestConverter_ConvertToReading_NormalizesUnknownHiragana(t *testing.T) {
 	}
 }
 
-// 呼び出し側が読みを決めた語はカタカナで渡す、という契約を固定します（ap-music はふりがなを
+// 呼び出し側が読みを決めた語はカタカナで渡す、という契約を固定します（楽曲生成サービスはふりがなを
 // カタカナにしてから渡す）。ひらがなで渡すと「へ」「を」が助詞として切り出されて読みが崩れ、
 // 後ろの語の読みまで変わるため、カタカナの語は読みも前後の語も変えないことを確かめます。
 func TestConverter_ConvertToReading_KeepsKatakanaReadings(t *testing.T) {
