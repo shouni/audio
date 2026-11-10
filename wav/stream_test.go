@@ -28,11 +28,11 @@ func TestCombineToMatchesCombineWavData(t *testing.T) {
 		opts  []CombineOption
 	}{
 		{
-			name:  "1本",
+			name:  "single input",
 			parts: [][]byte{buildWAV(defaultSpec([]byte{1, 2, 3, 4}))},
 		},
 		{
-			name: "複数本",
+			name: "multiple inputs",
 			parts: [][]byte{
 				buildWAV(defaultSpec([]byte{1, 2, 3, 4})),
 				buildWAV(defaultSpec([]byte{5, 6})),
@@ -40,7 +40,7 @@ func TestCombineToMatchesCombineWavData(t *testing.T) {
 			},
 		},
 		{
-			name: "無音を挟む",
+			name: "with gap",
 			parts: [][]byte{
 				buildWAV(defaultSpec([]byte{1, 2, 3, 4})),
 				buildWAV(defaultSpec([]byte{5, 6, 7, 8})),
@@ -48,21 +48,21 @@ func TestCombineToMatchesCombineWavData(t *testing.T) {
 			opts: []CombineOption{WithGap(20 * time.Millisecond)},
 		},
 		{
-			name: "dataの前に任意チャンクがある",
+			name: "extra chunk before data",
 			parts: [][]byte{
 				insertChunkBeforeData(buildWAV(defaultSpec([]byte{1, 2, 3, 4})), "LIST", []byte("abcdef")),
 				buildWAV(defaultSpec([]byte{5, 6})),
 			},
 		},
 		{
-			name: "奇数サイズのチャンクがある",
+			name: "odd-sized chunk",
 			parts: [][]byte{
 				insertChunkBeforeData(buildWAV(defaultSpec([]byte{1, 2, 3, 4})), "LIST", []byte("abcde")),
 				buildWAV(defaultSpec([]byte{5, 6})),
 			},
 		},
 		{
-			name: "factチャンクがある",
+			name: "fact chunk",
 			parts: [][]byte{
 				insertChunkBeforeData(buildWAV(defaultSpec([]byte{1, 2, 3, 4})), "fact", factChunk(2)),
 				buildWAV(defaultSpec([]byte{5, 6})),
@@ -70,7 +70,7 @@ func TestCombineToMatchesCombineWavData(t *testing.T) {
 			opts: []CombineOption{WithGap(time.Millisecond)},
 		},
 		{
-			name: "拡張形式",
+			name: "extensible format",
 			parts: [][]byte{
 				buildExtensibleWAV(defaultExtensibleSpec([]byte{1, 2, 3, 4})),
 				buildExtensibleWAV(defaultExtensibleSpec([]byte{5, 6, 7, 8})),
@@ -145,11 +145,11 @@ func TestCombineToRejectsBrokenHeaders(t *testing.T) {
 		name string
 		data []byte
 	}{
-		{"RIFFヘッダーより短い", []byte("RIF")},
-		{"空", nil},
-		{"RIFF識別子が不正", func() []byte { b := buildWAV(defaultSpec([]byte{1})); copy(b[0:], "RIFX"); return b }()},
-		{"fmtチャンクがない", func() []byte { b := buildWAV(defaultSpec([]byte{1})); copy(b[12:], "junk"); return b }()},
-		{"dataチャンクがない", func() []byte { b := buildWAV(defaultSpec([]byte{1})); copy(b[36:], "junk"); return b }()},
+		{"shorter than RIFF header", []byte("RIF")},
+		{"empty", nil},
+		{"invalid RIFF ID", func() []byte { b := buildWAV(defaultSpec([]byte{1})); copy(b[0:], "RIFX"); return b }()},
+		{"missing fmt chunk", func() []byte { b := buildWAV(defaultSpec([]byte{1})); copy(b[12:], "junk"); return b }()},
+		{"missing data chunk", func() []byte { b := buildWAV(defaultSpec([]byte{1})); copy(b[36:], "junk"); return b }()},
 	}
 
 	for _, tt := range tests {

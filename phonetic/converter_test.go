@@ -22,62 +22,62 @@ func TestConverter_ConvertToReading(t *testing.T) {
 		want  string
 	}{
 		{
-			name:  "通常の漢字まじり文",
+			name:  "ordinary kanji-kana text",
 			input: "放課後のチャイムが鳴る",
 			want:  "ホウカゴノチャイムガナル",
 		},
 		{
-			name:  "「並列」の読みチェック",
+			name:  "reading of heiretsu",
 			input: "並列回路のディストーション",
 			want:  "ヘイレツカイロノディストーション",
 		},
 		{
-			name:  "助詞「は」の歌唱補正",
+			name:  "singing fix for particle ha",
 			input: "私は閃光",
 			want:  "ワタシワヒカリ",
 		},
 		{
-			name:  "歌唱用の漢字読み補正",
+			name:  "singing kanji reading fix",
 			input: "荒野に刃と閃光",
 			want:  "コウヤニヤイバトヒカリ",
 		},
 		{
-			name:  "助詞「へ」の歌唱補正",
+			name:  "singing fix for particle he",
 			input: "武道館へ行こう",
 			want:  "ブドウカンエイコウ",
 		},
 		{
-			name:  "助詞「を」の歌唱補正",
+			name:  "singing fix for particle wo",
 			input: "絆を奏でる",
 			want:  "キズナオカナデル",
 		},
 		{
-			name:  "挨拶の発音例外",
+			name:  "greeting pronunciation exception",
 			input: "こんにちは、こんばんは",
 			want:  "コンニチワ、コンバンワ",
 		},
 		{
-			name:  "英語タグの保持",
+			name:  "keeps English tags",
 			input: "[Verse] 昨日の空は",
 			want:  "[Verse] キノウノソラワ",
 		},
 		{
-			name:  "カタカナ・英数字の混在",
+			name:  "mixed katakana and alphanumerics",
 			input: "BPM180で疾走する",
 			want:  "BPM180デシッソウスル",
 		},
 		{
-			name:  "改行の保持",
+			name:  "keeps newlines",
 			input: "絆の音\n響け",
 			want:  "キズナノオト\nヒビケ",
 		},
 		{
-			name:  "未知語（当て字）の挙動",
+			name:  "unknown word (ateji)",
 			input: "夜露死苦",
 			want:  "ヨロシク",
 		},
 		{
-			name:  "挨拶補正の副作用回避",
+			name:  "greeting fix has no side effect",
 			input: "コンニチハム",
 			want:  "コンニチハム",
 		},
@@ -89,12 +89,12 @@ func TestConverter_ConvertToReading(t *testing.T) {
 		// uses an override that actually exists, the test passes even with broken
 		// boundary handling.
 		{
-			name:  "形態素境界をまたぐ上書きは適用しない",
+			name:  "override across a morpheme boundary is not applied",
 			input: "掌握が変わる",
 			want:  "ショウアクガカワル",
 		},
 		{
-			name:  "境界が一致すれば上書きを適用する",
+			name:  "override on a matching boundary is applied",
 			input: "掌が熱い",
 			want:  "テノヒラガアツイ",
 		},
@@ -122,27 +122,27 @@ func TestConverter_ConvertToReading_WithPhraseSpacing(t *testing.T) {
 		want  string
 	}{
 		{
-			name:  "助詞「が」の後にスペース",
+			name:  "space after particle ga",
 			input: "空が青い",
 			want:  "ソラガ アオイ",
 		},
 		{
-			name:  "助詞「は」補正後にスペース",
+			name:  "space after corrected particle ha",
 			input: "私は歌う",
 			want:  "ワタシワ ウタウ",
 		},
 		{
-			name:  "助詞「を」補正後にスペース",
+			name:  "space after corrected particle wo",
 			input: "絆を奏でる",
 			want:  "キズナオ カナデル",
 		},
 		{
-			name:  "末尾の助詞後スペースはトリム",
+			name:  "trailing particle space is trimmed",
 			input: "夜の",
 			want:  "ヨルノ",
 		},
 		{
-			name:  "行末の助詞後スペースは行ごとにトリム",
+			name:  "line-end particle space is trimmed per line",
 			input: "夜の\n朝が来る",
 			want:  "ヨルノ\nアサガ クル",
 		},
@@ -150,7 +150,7 @@ func TestConverter_ConvertToReading_WithPhraseSpacing(t *testing.T) {
 		// analysed alone, taken as a conjunction rather than a particle, and loses its
 		// phrase space.
 		{
-			name:  "読み上書きに挟まれた助詞の後にもスペース",
+			name:  "space after a particle between overrides",
 			input: "運命の閃光が瞳を灼く",
 			want:  "サダメノ ヒカリガ ヒトミオ ヤク",
 		},
@@ -158,7 +158,7 @@ func TestConverter_ConvertToReading_WithPhraseSpacing(t *testing.T) {
 		// reads both correctly, so those overrides were removed. Adjacency can only be
 		// checked with words that actually have overrides.
 		{
-			name:  "読み上書きが連続しても文節が保たれる",
+			name:  "adjacent overrides keep phrases",
 			input: "刃と閃光を",
 			want:  "ヤイバト ヒカリオ",
 		},
@@ -514,22 +514,22 @@ func TestConverter_ConvertToReading_LineInitialWords(t *testing.T) {
 		want  string
 	}{
 		{
-			name:  "タグ行の直後",
+			name:  "right after a tag line",
 			input: "[Chorus]\n重なる鼓動",
 			want:  "[Chorus]\nカサナルコドウ",
 		},
 		{
-			name:  "行頭の改行直後",
+			name:  "right after a leading newline",
 			input: "\n重なる",
 			want:  "\nカサナル",
 		},
 		{
-			name:  "行またぎ",
+			name:  "across lines",
 			input: "声が\n重なる",
 			want:  "コエガ\nカサナル",
 		},
 		{
-			name:  "同一行のタグ直後は読み上書きで補正",
+			name:  "after a tag on the same line is fixed by override",
 			input: "[Chorus] 重なる鼓動",
 			want:  "[Chorus] カサナルコドウ",
 		},
@@ -602,10 +602,10 @@ func TestConverter_ConvertToReading_KeepsKatakanaReadings(t *testing.T) {
 		input string
 		want  string
 	}{
-		{name: "ヘ で始まる語", input: "流れる星とヘイソウする", want: "ナガレルホシトヘイソウスル"},
-		{name: "後ろの語の読みも変えない", input: "ヘイワな街", want: "ヘイワナマチ"},
-		{name: "助詞の直後", input: "君はヘイキだと言った", want: "キミワヘイキダトイッタ"},
-		{name: "ヲ で始まる語", input: "ヲトメの祈り", want: "ヲトメノイノリ"},
+		{name: "word starting with katakana he", input: "流れる星とヘイソウする", want: "ナガレルホシトヘイソウスル"},
+		{name: "following word reading unchanged", input: "ヘイワな街", want: "ヘイワナマチ"},
+		{name: "right after a particle", input: "君はヘイキだと言った", want: "キミワヘイキダトイッタ"},
+		{name: "word starting with katakana wo", input: "ヲトメの祈り", want: "ヲトメノイノリ"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -709,28 +709,28 @@ func TestConverter_ConvertToReading_PreservesLineTerminators(t *testing.T) {
 			want:  "ソラガ\r\nアオイ",
 		},
 		{
-			name:    "CRLFと文節スペース",
+			name:    "CRLF with phrase spacing",
 			options: []Option{WithPhraseSpacing()},
 			input:   "空が\r\n青い",
 			want:    "ソラガ\r\nアオイ",
 		},
 		{
-			name:  "末尾の改行",
+			name:  "trailing newline",
 			input: "空が青い\n",
 			want:  "ソラガアオイ\n",
 		},
 		{
-			name:  "空行",
+			name:  "blank line",
 			input: "空\n\n青",
 			want:  "ソラ\n\nアオ",
 		},
 		{
-			name:  "改行なし",
+			name:  "no newline",
 			input: "空が青い",
 			want:  "ソラガアオイ",
 		},
 		{
-			name:  "空文字",
+			name:  "empty string",
 			input: "",
 			want:  "",
 		},
@@ -750,7 +750,7 @@ func TestConverter_ConvertToReading_PreservesLineTerminators(t *testing.T) {
 }
 
 func TestConverter_WithReadingOverridesJSON(t *testing.T) {
-	t.Run("JSONから読み上書きを追加できること", func(t *testing.T) {
+	t.Run("adds overrides from JSON", func(t *testing.T) {
 		converter, err := NewConverter(WithReadingOverridesJSON([]byte(`{"閃光": "センコウ"}`)))
 		if err != nil {
 			t.Fatalf("NewConverter() error = %v", err)
@@ -760,7 +760,7 @@ func TestConverter_WithReadingOverridesJSON(t *testing.T) {
 		}
 	})
 
-	t.Run("標準の上書きと併用できること", func(t *testing.T) {
+	t.Run("combines with default overrides", func(t *testing.T) {
 		converter, err := NewConverter(WithReadingOverridesJSON([]byte(`{"閃光": "センコウ"}`)))
 		if err != nil {
 			t.Fatalf("NewConverter() error = %v", err)
@@ -773,15 +773,15 @@ func TestConverter_WithReadingOverridesJSON(t *testing.T) {
 	// An Option cannot return a value, so NewConverter returns the error. Silently ignoring
 	// it would produce a Converter whose overrides do not work, without anyone noticing the
 	// dictionary failed to load.
-	t.Run("壊れたJSONはNewConverterがエラーにすること", func(t *testing.T) {
+	t.Run("broken JSON makes NewConverter fail", func(t *testing.T) {
 		tests := []struct {
 			name string
 			data string
 		}{
-			{"JSONとして不正", `{`},
-			{"キーが空", `{"": "センコウ"}`},
-			{"値が空", `{"閃光": ""}`},
-			{"値が文字列でない", `{"閃光": 1}`},
+			{"invalid JSON", `{`},
+			{"empty key", `{"": "センコウ"}`},
+			{"empty value", `{"閃光": ""}`},
+			{"non-string value", `{"閃光": 1}`},
 		}
 
 		for _, tt := range tests {

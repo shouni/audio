@@ -116,10 +116,10 @@ func TestCombineWavDataGapEdgeCases(t *testing.T) {
 		name string
 		gap  time.Duration
 	}{
-		{"gapが0なら無音を挟まない", 0},
-		{"gapが負なら無音を挟まない", -time.Second},
+		{"zero gap inserts no silence", 0},
+		{"negative gap inserts no silence", -time.Second},
 		// One sample of 24kHz 16-bit mono is about 41.6µs. Anything shorter truncates to 0.
-		{"1サンプルに満たないgapは切り捨てる", 10 * time.Microsecond},
+		{"gap shorter than one sample truncates", 10 * time.Microsecond},
 	}
 
 	for _, tt := range tests {
@@ -203,9 +203,9 @@ func TestCombineWavDataUpdatesFactChunk(t *testing.T) {
 		opts []CombineOption
 		want int64
 	}{
-		{name: "無音なし", want: 5},
+		{name: "without silence", want: 5},
 		// 1ms of silence is 24 samples.
-		{name: "無音あり", opts: []CombineOption{WithGap(time.Millisecond)}, want: 5 + 24},
+		{name: "with silence", opts: []CombineOption{WithGap(time.Millisecond)}, want: 5 + 24},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -280,7 +280,7 @@ func TestCombineRejectsMisalignedIntermediateInput(t *testing.T) {
 	misaligned := buildWAV(defaultSpec([]byte{1, 2, 3}))
 	aligned := buildWAV(defaultSpec([]byte{4, 5, 6, 7}))
 
-	t.Run("途中の入力は拒む", func(t *testing.T) {
+	t.Run("rejects a middle input", func(t *testing.T) {
 		_, err := CombineWavData([][]byte{misaligned, aligned})
 		var headerErr *ErrInvalidWAVHeader
 		if !errors.As(err, &headerErr) {
@@ -294,7 +294,7 @@ func TestCombineRejectsMisalignedIntermediateInput(t *testing.T) {
 		}
 	})
 
-	t.Run("最後の入力は通す", func(t *testing.T) {
+	t.Run("accepts the last input", func(t *testing.T) {
 		if _, err := CombineWavData([][]byte{aligned, misaligned}); err != nil {
 			t.Errorf("CombineWavData() error = %v, want nil", err)
 		}

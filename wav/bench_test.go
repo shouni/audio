@@ -47,7 +47,7 @@ func BenchmarkCombineWavDataWithGap(b *testing.B) {
 // the number of inputs grows 8 times.
 func BenchmarkCombineTo(b *testing.B) {
 	for _, count := range []int{8, 64} {
-		b.Run(fmt.Sprintf("%d本", count), func(b *testing.B) {
+		b.Run(fmt.Sprintf("%d inputs", count), func(b *testing.B) {
 			parts := benchParts(count)
 			sources := readSeekers(parts...)
 			b.ReportAllocs()

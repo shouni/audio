@@ -20,51 +20,51 @@ func TestConverter_WithNumberReading(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"年月日", "2026年8月25日", "ニセンニジュウロクネンハチガツニジュウゴニチ"},
-		{"時刻", "12時30分", "ジュウニジサンジュップン"},
-		{"桁区切りのカンマ", "1,234,567円", "ヒャクニジュウサンマンヨンセンゴヒャクロクジュウナナエン"},
-		{"小数", "3.5秒", "サンテンゴビョウ"},
-		{"小数と記号", "2.5%", "ニテンゴパーセント"},
-		{"パーセント", "100%の愛", "ヒャクパーセントノアイ"},
-		{"README の例", "1,234人が100%を3ヶ月で", "センニヒャクサンジュウヨニンガヒャクパーセントオサンカゲツデ"},
-		{"README の例（助数詞の音便）", "1本と3本と6本", "イッポントサンボントロッポン"},
-		{"全角数字", "１２３", "ヒャクニジュウサン"},
-		{"ゼロ", "0", "ゼロ"},
-		{"助数詞なし", "BPM180で疾走する", "BPMヒャクハチジュウデシッソウスル"},
-		{"接頭辞と組み合わせ", "第3回", "ダイサンカイ"},
-		{"位取りの漢字", "1兆と3億と1万", "イッチョウトサンオクトイチマン"},
-		{"人の特殊読み", "1人と2人と4人", "ヒトリトフタリトヨニン"},
+		{"date", "2026年8月25日", "ニセンニジュウロクネンハチガツニジュウゴニチ"},
+		{"time of day", "12時30分", "ジュウニジサンジュップン"},
+		{"thousands separators", "1,234,567円", "ヒャクニジュウサンマンヨンセンゴヒャクロクジュウナナエン"},
+		{"decimal", "3.5秒", "サンテンゴビョウ"},
+		{"decimal with symbol", "2.5%", "ニテンゴパーセント"},
+		{"percent", "100%の愛", "ヒャクパーセントノアイ"},
+		{"README example", "1,234人が100%を3ヶ月で", "センニヒャクサンジュウヨニンガヒャクパーセントオサンカゲツデ"},
+		{"README example (counter sound changes)", "1本と3本と6本", "イッポントサンボントロッポン"},
+		{"full-width digits", "１２３", "ヒャクニジュウサン"},
+		{"zero", "0", "ゼロ"},
+		{"no counter", "BPM180で疾走する", "BPMヒャクハチジュウデシッソウスル"},
+		{"with prefix", "第3回", "ダイサンカイ"},
+		{"place-value kanji", "1兆と3億と1万", "イッチョウトサンオクトイチマン"},
+		{"irregular readings of nin", "1人と2人と4人", "ヒトリトフタリトヨニン"},
 		// The 「ヨ」 of 四人ヨニン depends on the ones digit, so 十四人 is ジュウヨニン too.
-		{"一の位で決まる読み", "14人と24人と11人", "ジュウヨニントニジュウヨニントジュウイチニン"},
-		{"時刻の一の位", "4時と17時と19時と24時", "ヨジトジュウシチジトジュウクジトニジュウヨジ"},
-		{"年と円の一の位", "14年で14円", "ジュウヨネンデジュウヨエン"},
+		{"reading decided by the ones digit", "14人と24人と11人", "ジュウヨニントニジュウヨニントジュウイチニン"},
+		{"ones digit of hours", "4時と17時と19時と24時", "ヨジトジュウシチジトジュウクジトニジュウヨジ"},
+		{"ones digit of years and yen", "14年で14円", "ジュウヨネンデジュウヨエン"},
 		// 「1日」 alone or in a date is ツイタチ, but イチニチ when a duration word or a number
 		// follows.
-		{"1日は日付", "8月1日と毎月1日、1日から3日まで", "ハチガツツイタチトマイツキツイタチ、ツイタチカラミッカマデ"},
-		{"1日は期間", "1日中に1日3回、1日目と1日おきと1日あたり", "イチニチチュウニイチニチサンカイ、イチニチメトイチニチオキトイチニチアタリ"},
-		{"1日半と1日後", "1日半と1日後", "イチニチハントイチニチゴ"},
+		{"first of the month as a date", "8月1日と毎月1日、1日から3日まで", "ハチガツツイタチトマイツキツイタチ、ツイタチカラミッカマデ"},
+		{"one day as a duration", "1日中に1日3回、1日目と1日おきと1日あたり", "イチニチチュウニイチニチサンカイ、イチニチメトイチニチオキトイチニチアタリ"},
+		{"day and a half and a day later", "1日半と1日後", "イチニチハントイチニチゴ"},
 		// The analyser emits 「日間」 and 「分間」 as one token, so they are read by entries
 		// separate from 「日」 and 「分」.
-		{"日間", "1日間と2日間と3日間と14日間", "イチニチカントフツカカントミッカカントジュウヨッカカン"},
-		{"分間", "1分間と3分間と10分間と十分間", "イップンカントサンプンカントジュップンカントジュップンカン"},
-		{"時と時間の一の位", "0時と9時間", "レイジトクジカン"},
-		{"サ行・タ行の促音便", "1体と1社と1章と1種類と3種類", "イッタイトイッシャトイッショウトイッシュルイトサンシュルイ"},
+		{"day durations", "1日間と2日間と3日間と14日間", "イチニチカントフツカカントミッカカントジュウヨッカカン"},
+		{"minute durations", "1分間と3分間と10分間と十分間", "イップンカントサンプンカントジュップンカントジュップンカン"},
+		{"ones digit of hours and durations", "0時と9時間", "レイジトクジカン"},
+		{"gemination before sa and ta rows", "1体と1社と1章と1種類と3種類", "イッタイトイッシャトイッショウトイッシュルイトサンシュルイ"},
 		// Full-width digits become one token per character, so the digits after a thousands
 		// separator are counted together.
-		{"全角の桁区切り", "２，０００円と１，２３４，５６７円", "ニセンエントヒャクニジュウサンマンヨンセンゴヒャクロクジュウナナエン"},
-		{"全角の桁区切りでない読点", "１，２月と１，２３４５", "イチ，ニガツトイチ，ニセンサンビャクヨンジュウゴ"},
-		{"全角の小数", "３．５秒", "サンテンゴビョウ"},
-		{"日の特殊読み", "1日と20日と14日", "ツイタチトハツカトジュウヨッカ"},
-		{"つの特殊読み", "3つの願い", "ミッツノネガイ"},
-		{"歳の特殊読み", "20歳", "ハタチ"},
-		{"月の特殊読み", "4月と7月と9月", "シガツトシチガツトクガツ"},
-		{"ヶ月", "3ヶ月と1ヶ月", "サンカゲツトイッカゲツ"},
+		{"full-width thousands separators", "２，０００円と１，２３４，５６７円", "ニセンエントヒャクニジュウサンマンヨンセンゴヒャクロクジュウナナエン"},
+		{"full-width comma that is not a separator", "１，２月と１，２３４５", "イチ，ニガツトイチ，ニセンサンビャクヨンジュウゴ"},
+		{"full-width decimal", "３．５秒", "サンテンゴビョウ"},
+		{"irregular readings of days", "1日と20日と14日", "ツイタチトハツカトジュウヨッカ"},
+		{"irregular reading of tsu", "3つの願い", "ミッツノネガイ"},
+		{"irregular reading of age", "20歳", "ハタチ"},
+		{"irregular readings of months", "4月と7月と9月", "シガツトシチガツトクガツ"},
+		{"month counts", "3ヶ月と1ヶ月", "サンカゲツトイッカゲツ"},
 		// A leading 0 usually marks an identifier rather than a quantity, so it is not read by
 		// place value.
-		{"先頭がゼロ", "007", "ゼロゼロナナ"},
-		{"電話番号のような並び", "0120", "ゼロイチニゼロ"},
+		{"leading zeros", "007", "ゼロゼロナナ"},
+		{"phone-number-like sequence", "0120", "ゼロイチニゼロ"},
 		// Digit counts that do not fit in a uint64 are read one character at a time too.
-		{"桁あふれ", "12345678901234567890123", "イチニサンヨンゴロクナナハチキュウゼロイチニサンヨンゴロクナナハチキュウゼロイチニサン"},
+		{"digit overflow", "12345678901234567890123", "イチニサンヨンゴロクナナハチキュウゼロイチニサンヨンゴロクナナハチキュウゼロイチニサン"},
 	}
 
 	for _, tt := range tests {
@@ -113,7 +113,7 @@ func TestKanjiNumerals(t *testing.T) {
 		want map[string]string
 	}{
 		{
-			name: "助数詞との境目で音が変わる",
+			name: "sound changes at the counter boundary",
 			want: map[string]string{
 				"三本": "サンボン", "十本": "ジュッポン", "一本の矢": "イッポンノヤ",
 				"一階": "イッカイ", "一杯": "イッパイ", "一発": "イッパツ", "一回": "イッカイ",
@@ -121,7 +121,7 @@ func TestKanjiNumerals(t *testing.T) {
 			},
 		},
 		{
-			name: "特殊読み",
+			name: "irregular readings",
 			want: map[string]string{
 				"一人": "ヒトリ", "二人で": "フタリデ", "一粒": "ヒトツブ",
 				"三日": "ミッカ", "四日": "ヨッカ", "二十日": "ハツカ", "二十歳": "ハタチ",
@@ -129,14 +129,14 @@ func TestKanjiNumerals(t *testing.T) {
 			},
 		},
 		{
-			name: "促音便を上書きに頼っていた語",
+			name: "words that relied on overrides for gemination",
 			want: map[string]string{
 				"僕が一歩を踏み出す": "ボクガイッポオフミダス",
 				"一本気な一匹狼":   "イッポンギナイッピキオオカミ",
 			},
 		},
 		{
-			name: "位取りと桁の列",
+			name: "place values and digit sequences",
 			want: map[string]string{
 				"二千二十六年": "ニセンニジュウロクネン", "二〇二六年": "ニセンニジュウロクネン",
 				"十万人": "ジュウマンニン", "百万本": "ヒャクマンボン", "一千万人": "イッセンマンニン",
@@ -144,14 +144,14 @@ func TestKanjiNumerals(t *testing.T) {
 			},
 		},
 		{
-			name: "助数詞が続かない漢数字は辞書読みのまま",
+			name: "kanji numerals without a counter keep the dictionary reading",
 			want: map[string]string{
 				"三": "サン", "千の風": "センノカゼ", "三三七拍子": "サンサンナナヒョウシ",
 				"一途": "イチズ", "四季": "シキ", "十分な": "ジュウブンナ", "一人前": "イチニンマエ",
 			},
 		},
 		{
-			name: "単位語で始まる並びは数ではない",
+			name: "sequence starting with a unit word is not a number",
 			want: map[string]string{
 				"万円": "マンエン", "数万円": "スウマンエン", "万感の思い": "バンカンノオモイ",
 			},
@@ -161,7 +161,7 @@ func TestKanjiNumerals(t *testing.T) {
 			// イチニチ (一日中, 一日の終わり). Overrides take effect before the rules, so a reading
 			// override protects it. The Arabic "1日" on its own is a date and stays ツイタチ
 			// (readFirstDayAsDuration handles a following duration word).
-			name: "一日は上書きでイチニチ",
+			name: "ichinichi by override",
 			want: map[string]string{
 				"一日中": "イチニチチュウ", "一日の終わり": "イチニチノオワリ", "1日": "ツイタチ",
 			},
@@ -229,35 +229,35 @@ func TestCounterSoundChanges(t *testing.T) {
 		want map[string]string
 	}{
 		{
-			name: "カ行は促音便だけ",
+			name: "ka row only geminates",
 			want: map[string]string{
 				"1回": "イッカイ", "3回": "サンカイ", "6回": "ロッカイ",
 				"8回": "ハッカイ", "10回": "ジュッカイ", "100回": "ヒャッカイ",
 			},
 		},
 		{
-			name: "カ行のうち軒と階は三で連濁",
+			name: "ken and kai voice after three in the ka row",
 			want: map[string]string{
 				"1軒": "イッケン", "3軒": "サンゲン", "6軒": "ロッケン",
 				"3階": "サンガイ", "13階": "ジュウサンガイ",
 			},
 		},
 		{
-			name: "サ行は六と百で変化しない",
+			name: "sa row unchanged after six and hundred",
 			want: map[string]string{
 				"1冊": "イッサツ", "3冊": "サンサツ", "6冊": "ロクサツ",
 				"8冊": "ハッサツ", "10冊": "ジュッサツ", "100冊": "ヒャクサツ",
 			},
 		},
 		{
-			name: "タ行はサ行と同じ条件",
+			name: "ta row follows the sa row rules",
 			want: map[string]string{
 				"1点": "イッテン", "6点": "ロクテン", "8点": "ハッテン",
 				"100点": "ヒャクテン", "1兆": "イッチョウ", "10兆": "ジュッチョウ",
 			},
 		},
 		{
-			name: "ハ行は三で連濁",
+			name: "ha row voices after three",
 			want: map[string]string{
 				"1本": "イッポン", "3本": "サンボン", "4本": "ヨンホン",
 				"6本": "ロッポン", "10本": "ジュッポン", "100本": "ヒャッポン",
@@ -265,14 +265,14 @@ func TestCounterSoundChanges(t *testing.T) {
 			},
 		},
 		{
-			name: "ハ行でも発と泊は三で半濁音",
+			name: "hatsu and haku take p after three in the ha row",
 			want: map[string]string{
 				"1発": "イッパツ", "3発": "サンパツ", "4発": "ヨンハツ",
 				"6発": "ロッパツ", "3泊": "サンパク", "3編": "サンペン", "10000発": "イチマンパツ",
 			},
 		},
 		{
-			name: "場所と単位も促音便",
+			name: "places and units geminate",
 			want: map[string]string{
 				"1ヶ所": "イッカショ", "1箇所": "イッカショ", "6ヶ所": "ロッカショ", "3ヶ所": "サンカショ",
 				"1丁目": "イッチョウメ", "8丁目": "ハッチョウメ", "1頭": "イットウ", "3頭": "サントウ",
@@ -283,7 +283,7 @@ func TestCounterSoundChanges(t *testing.T) {
 			},
 		},
 		{
-			name: "和語で数える助数詞は一つ二つがヒト・フタ",
+			name: "native counters read hito and futa for one and two",
 			want: map[string]string{
 				"1組": "ヒトクミ", "2組": "フタクミ", "3組": "サンクミ", "10組": "ジュックミ",
 				"1株": "ヒトカブ", "2切れ": "フタキレ", "1皿": "ヒトサラ", "8皿": "ハッサラ",
@@ -291,7 +291,7 @@ func TestCounterSoundChanges(t *testing.T) {
 			},
 		},
 		{
-			name: "分だけは四でも半濁音",
+			name: "only fun takes p after four",
 			want: map[string]string{
 				"1分": "イップン", "2分": "ニフン", "3分": "サンプン",
 				"4分": "ヨンプン", "14分": "ジュウヨンプン", "6分": "ロップン",
@@ -345,7 +345,7 @@ func TestNumberReadingRespectsTokenBoundaries(t *testing.T) {
 // TestNumberReadingCombinesWithOtherOptions checks that number reading works together with
 // reading overrides and phrase spacing.
 func TestNumberReadingCombinesWithOtherOptions(t *testing.T) {
-	t.Run("文節スペースと併用", func(t *testing.T) {
+	t.Run("with phrase spacing", func(t *testing.T) {
 		converter, err := NewConverter(WithNumberReading(), WithPhraseSpacing())
 		if err != nil {
 			t.Fatalf("NewConverter() error = %v", err)
@@ -356,7 +356,7 @@ func TestNumberReadingCombinesWithOtherOptions(t *testing.T) {
 	})
 
 	// A reading the user stated takes precedence over the default interpretation of a number.
-	t.Run("読み上書きが数より優先される", func(t *testing.T) {
+	t.Run("reading override wins over number reading", func(t *testing.T) {
 		converter, err := NewConverter(
 			WithNumberReading(),
 			WithReadingOverrides(map[string]string{"4649": "ヨロシク"}),

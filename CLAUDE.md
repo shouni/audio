@@ -76,7 +76,7 @@ Entries whose reading matches what the dictionary already produces change no beh
 - `wav` tests build their fixtures programmatically (`buildWAV`, `defaultSpec`, `insertChunkBeforeData` in `wav/header_test.go`); there are no binary test fixtures in the repo. Keep it that way — a malformed-input case should be constructed in code where the malformation is visible.
 - Three fuzz targets in `wav/fuzz_test.go` run in CI, as above. New parsing code belongs behind them rather than behind a hand-listed set of bad inputs.
 - `wav/bench_test.go` measures both combine paths with `b.ReportAllocs()` / `b.SetBytes`; the allocation count is the point of the memory-efficiency claims, so check it before changing the buffer strategy.
-- Test function names are English. Subtest names (`t.Run` names and table `name` fields) are still Japanese; they are labels, not messages, and may be moved to English later.
+- Test function and subtest names (`t.Run` / `b.Run` names and table `name` fields) are English. The exception is a subtest named by its data: tables that run `t.Run(tt.input)`, `t.Run(tt.want)` or `t.Run(surface)` keep the Japanese input or reading as the name.
 
 ## Conventions
 

@@ -258,12 +258,12 @@ func TestRejectsUnsupportedFormat(t *testing.T) {
 		{"IMA ADPCM", plain(0x11, 4)},
 		{"MS ADPCM", plain(2, 4)},
 		{"MP3", plain(0x55, 0)},
-		{"4ビットPCM", plain(pcmFormatTag, 4)},
-		{"12ビットPCM", plain(pcmFormatTag, 12)},
-		{"16ビットfloat", plain(floatFormatTag, 16)},
-		{"16ビットμ-law", plain(muLawFormatTag, 16)},
-		{"拡張形式のADPCM", extensible(subFormatGUID(0x11), 16)},
-		{"拡張形式の非標準GUID", extensible(nonStandardGUID, 16)},
+		{"4-bit PCM", plain(pcmFormatTag, 4)},
+		{"12-bit PCM", plain(pcmFormatTag, 12)},
+		{"16-bit float", plain(floatFormatTag, 16)},
+		{"16-bit μ-law", plain(muLawFormatTag, 16)},
+		{"extensible ADPCM", extensible(subFormatGUID(0x11), 16)},
+		{"extensible non-standard GUID", extensible(nonStandardGUID, 16)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -293,10 +293,10 @@ func TestAcceptsSupportedFormat(t *testing.T) {
 		name string
 		spec wavSpec
 	}{
-		{"8ビットPCM", wavSpec{audioFormat: pcmFormatTag, bitsPerSample: 8}},
-		{"24ビットPCM", wavSpec{audioFormat: pcmFormatTag, bitsPerSample: 24}},
-		{"32ビットfloat", wavSpec{audioFormat: floatFormatTag, bitsPerSample: 32}},
-		{"64ビットfloat", wavSpec{audioFormat: floatFormatTag, bitsPerSample: 64}},
+		{"8-bit PCM", wavSpec{audioFormat: pcmFormatTag, bitsPerSample: 8}},
+		{"24-bit PCM", wavSpec{audioFormat: pcmFormatTag, bitsPerSample: 24}},
+		{"32-bit float", wavSpec{audioFormat: floatFormatTag, bitsPerSample: 32}},
+		{"64-bit float", wavSpec{audioFormat: floatFormatTag, bitsPerSample: 64}},
 		{"A-law", wavSpec{audioFormat: aLawFormatTag, bitsPerSample: 8}},
 		{"μ-law", wavSpec{audioFormat: muLawFormatTag, bitsPerSample: 8}},
 	}
@@ -328,7 +328,7 @@ func TestFormatSilenceByte(t *testing.T) {
 		{"8bit PCM", Format{AudioFormat: pcmFormatTag, BitsPerSample: 8}, 0x80},
 		{"16bit PCM", Format{AudioFormat: pcmFormatTag, BitsPerSample: 16}, 0x00},
 		{"32bit float", Format{AudioFormat: 3, BitsPerSample: 32}, 0x00},
-		{"拡張形式の8bit PCM", Format{AudioFormat: extensibleFormatTag, BitsPerSample: 8, SubFormat: subFormatPCM}, 0x80},
+		{"extensible 8bit PCM", Format{AudioFormat: extensibleFormatTag, BitsPerSample: 8, SubFormat: subFormatPCM}, 0x80},
 		// G.711 has different encoding rules altogether, so writing 0x00 gives noise, not silence.
 		{"μ-law", Format{AudioFormat: muLawFormatTag, BitsPerSample: 8}, 0xFF},
 		{"A-law", Format{AudioFormat: aLawFormatTag, BitsPerSample: 8}, 0xD5},

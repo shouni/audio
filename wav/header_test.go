@@ -54,22 +54,22 @@ func TestCombineWavDataRejectsMismatchedFormat(t *testing.T) {
 		wantField string
 	}{
 		{
-			name:      "サンプルレート違い",
+			name:      "different sample rate",
 			mutate:    func(s *wavSpec) { s.sampleRate = 48000 },
 			wantField: "sample rate",
 		},
 		{
-			name:      "チャンネル数違い",
+			name:      "different channel count",
 			mutate:    func(s *wavSpec) { s.numChannels = 2 },
 			wantField: "channel count",
 		},
 		{
-			name:      "量子化ビット数違い",
+			name:      "different bit depth",
 			mutate:    func(s *wavSpec) { s.bitsPerSample = 24 },
 			wantField: "bits per sample",
 		},
 		{
-			name: "フォーマット種別違い",
+			name: "different format type",
 			// Only 32/64-bit float is supported, so change the bit depth along with it.
 			// AudioFormat is compared first, so the mismatch is reported as the format tag.
 			mutate:    func(s *wavSpec) { s.audioFormat = floatFormatTag; s.bitsPerSample = 32 },
@@ -163,23 +163,23 @@ func TestExtractAudioDataRejectsBrokenHeaders(t *testing.T) {
 		data []byte
 	}{
 		{
-			name: "RIFFヘッダーより短い",
+			name: "shorter than RIFF header",
 			data: []byte("RIF"),
 		},
 		{
-			name: "RIFF識別子が不正",
+			name: "invalid RIFF ID",
 			data: func() []byte { b := buildWAV(defaultSpec([]byte{1})); copy(b[0:], "RIFX"); return b }(),
 		},
 		{
-			name: "WAVE識別子が不正",
+			name: "invalid WAVE ID",
 			data: func() []byte { b := buildWAV(defaultSpec([]byte{1})); copy(b[8:], "WAVX"); return b }(),
 		},
 		{
-			name: "fmtチャンクがない",
+			name: "missing fmt chunk",
 			data: func() []byte { b := buildWAV(defaultSpec([]byte{1})); copy(b[12:], "junk"); return b }(),
 		},
 		{
-			name: "fmtチャンクが短すぎる",
+			name: "fmt chunk too short",
 			data: func() []byte {
 				b := buildWAV(defaultSpec([]byte{1}))
 				binary.LittleEndian.PutUint32(b[16:], 8)
@@ -187,11 +187,11 @@ func TestExtractAudioDataRejectsBrokenHeaders(t *testing.T) {
 			}(),
 		},
 		{
-			name: "dataチャンクがない",
+			name: "missing data chunk",
 			data: func() []byte { b := buildWAV(defaultSpec([]byte{1})); copy(b[36:], "junk"); return b }(),
 		},
 		{
-			name: "dataチャンクのサイズがファイル長を超える",
+			name: "data chunk size exceeds file length",
 			data: func() []byte {
 				b := buildWAV(defaultSpec([]byte{1, 2, 3}))
 				binary.LittleEndian.PutUint32(b[40:], 9999)
