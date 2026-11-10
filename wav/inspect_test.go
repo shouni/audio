@@ -7,8 +7,8 @@ import (
 )
 
 func TestInspect(t *testing.T) {
-	t.Run("フォーマットとデータサイズを読み取れること", func(t *testing.T) {
-		// 24kHz モノラル 16bit = 48000 バイト/秒。4800 バイトはちょうど 100ms。
+	t.Run("reads format and data size", func(t *testing.T) {
+		// 24kHz mono 16-bit = 48000 bytes/s, so 4800 bytes is exactly 100ms.
 		audio := make([]byte, 4800)
 
 		info, err := Inspect(buildWAV(defaultSpec(audio)))
@@ -28,7 +28,7 @@ func TestInspect(t *testing.T) {
 		}
 	})
 
-	t.Run("dataの前に任意チャンクがあっても読み取れること", func(t *testing.T) {
+	t.Run("reads with an extra chunk before data", func(t *testing.T) {
 		withList := insertChunkBeforeData(buildWAV(defaultSpec([]byte{1, 2, 3, 4})), "LIST", []byte("abcdef"))
 
 		info, err := Inspect(withList)
@@ -40,7 +40,7 @@ func TestInspect(t *testing.T) {
 		}
 	})
 
-	t.Run("不正なWAVはIndex=-1のヘッダーエラーになること", func(t *testing.T) {
+	t.Run("invalid WAV is a header error with Index -1", func(t *testing.T) {
 		_, err := Inspect([]byte("RIF"))
 		if err == nil {
 			t.Fatal("Inspect() error = nil, want ErrInvalidWAVHeader")

@@ -7,86 +7,92 @@ import (
 	"strings"
 )
 
-// RIFF 構造の解析に使用するサイズ定数です。
+// Size constants used to parse the RIFF structure.
 const (
-	// chunkIDSize は、チャンクID ("RIFF", "fmt ", "data" 等) のサイズ（バイト）です。
+	// chunkIDSize is the size in bytes of a chunk ID ("RIFF", "fmt ", "data" and so on).
 	chunkIDSize = 4
-	// chunkSizeSize は、チャンクサイズフィールドのサイズ（バイト）です。
+	// chunkSizeSize is the size in bytes of a chunk size field.
 	chunkSizeSize = 4
-	// waveIDSize は "WAVE" 識別子のサイズ（バイト）です。
+	// waveIDSize is the size in bytes of the "WAVE" identifier.
 	waveIDSize = 4
 )
 
-// WAV ファイルのヘッダー計算で使用される複合サイズ定数です。
+// Composite size constants used in WAV header arithmetic.
 const (
-	// standardHeaderSize は、拡張チャンクを持たない WAV のヘッダーサイズ（44バイト）です。
+	// standardHeaderSize is the header size of a WAV with no extra chunks (44 bytes).
 	standardHeaderSize = 44
-	// chunkHeaderSize は、チャンクヘッダー (ID + サイズ) の合計サイズ（8バイト）です。
+	// chunkHeaderSize is the total size of a chunk header, ID plus size (8 bytes).
 	chunkHeaderSize = chunkIDSize + chunkSizeSize
-	// minFormatChunkSize は PCM の "fmt " チャンクのペイロードサイズ（16バイト）です。
+	// minFormatChunkSize is the payload size of a PCM "fmt " chunk (16 bytes).
 	minFormatChunkSize = 16
-	// extensibleFormatChunkSize は WAVE_FORMAT_EXTENSIBLE の "fmt " チャンクの
-	// ペイロードサイズ（40バイト）です。
+	// extensibleFormatChunkSize is the payload size of a WAVE_FORMAT_EXTENSIBLE
+	// "fmt " chunk (40 bytes).
 	extensibleFormatChunkSize = 40
-	// wavRiffHeaderSize は RIFF ヘッダーの合計サイズ（12バイト）です。
+	// wavRiffHeaderSize is the total size of the RIFF header (12 bytes).
 	wavRiffHeaderSize = chunkIDSize + chunkSizeSize + waveIDSize
 )
 
-// riffChunkSizeOffset は、結合時に RIFF チャンクサイズを書き換えるオフセット位置（4バイト目）です。
+// riffChunkSizeOffset is the offset of the RIFF chunk size rewritten when combining (byte 4).
 const riffChunkSizeOffset = chunkIDSize
 
-// extensibleFormatTag は WAVE_FORMAT_EXTENSIBLE を表す AudioFormat の値です。
-// この値のときだけ、実際の符号化方式は fmt チャンク末尾の SubFormat GUID 側にあります。
+// extensibleFormatTag is the AudioFormat value for WAVE_FORMAT_EXTENSIBLE.
+// Only with this value does the actual encoding live in the SubFormat GUID at the end of
+// the fmt chunk.
 const extensibleFormatTag = 0xFFFE
 
-// wavParts は1つの WAV から取り出した、結合に必要な部品です。
+// wavParts are the pieces of one WAV that combining needs.
 type wavParts struct {
-	// formatHeader は data チャンク直前までの、そのまま出力へ引き継ぐヘッダーです。
+	// formatHeader is the header up to just before the data chunk, carried into the
+	// output as is.
 	formatHeader []byte
 	format       Format
 	audioData    []byte
 }
 
-// wavLayout は1つの WAV について、走査で判明した位置とフォーマットです。
+// wavLayout is what scanning found out about one WAV: positions and format.
 type wavLayout struct {
 	format Format
-	// headerSize は data チャンクヘッダーが始まる位置、つまり引き継ぐヘッダーの長さです。
+	// headerSize is where the data chunk header starts, which is also the length of the
+	// carried header.
 	headerSize int64
-	// dataOffset は data チャンクのペイロードが始まる位置です。
+	// dataOffset is where the data chunk payload starts.
 	dataOffset int64
-	// dataSize は data チャンクのペイロードのバイト数です。
+	// dataSize is the number of bytes in the data chunk payload.
 	dataSize int64
 }
 
-// chunkSource は走査対象の WAV で、メモリ上のバイト列か io.ReadSeeker のどちらかを持ちます。
+// chunkSource is a WAV to scan, held either as an in-memory byte slice or as an
+// io.ReadSeeker.
 //
-// 両方をこの形に揃えることで、チャンク走査と検証を scanWAV の 1 本に置き、
-// CombineWavData と CombineTo が受け付ける入力と返すエラーが食い違わないようにします。
+// Bringing both into this shape puts chunk scanning and validation in the single scanWAV,
+// so CombineWavData and CombineTo cannot disagree on which inputs they accept or which
+// errors they return.
 //
-// interface ではなく 1 つの構造体にしているのは割り当てのためです。interface のメソッド
-// 呼び出しは引数がヒープへ逃げるので、走査のたびに読み出しバッファが確保されてしまい、
-// Inspect が割り当てなしで済むという性質が崩れます。
+// It is one struct rather than an interface because of allocations. An interface method
+// call makes its arguments escape to the heap, so every scan would allocate a read
+// buffer, and Inspect would lose the property of running without allocating.
 type chunkSource struct {
-	// data はメモリ上の入力です。stream が nil のときに使います。
+	// data is the in-memory input. It is used when stream is nil.
 	data   []byte
 	stream io.ReadSeeker
-	// index はエラーメッセージに含めるファイル位置です。
+	// index is the file position included in error messages.
 	index int
-	// total は WAV 全体のバイト数です。
+	// total is the size of the whole WAV in bytes.
 	total int64
-	// buf は stream からの固定長読み出しに使います。fmt チャンクのペイロードが最大です。
-	// io.ReadFull へ渡すとヒープへ逃げるため、配列を構造体に埋め込まずストリームの
-	// ときだけ確保します。こうするとバイト列の走査は割り当てなしで済みます。
+	// buf is used for fixed-length reads from stream; the fmt chunk payload is the largest.
+	// Passing it to io.ReadFull makes it escape to the heap, so rather than embedding an
+	// array in the struct it is allocated only for streams. That keeps scanning a byte
+	// slice allocation-free.
 	buf []byte
 }
 
-// bytesSource はメモリ上のバイト列に対する chunkSource を返します。
+// bytesSource returns a chunkSource over an in-memory byte slice.
 func bytesSource(data []byte, index int) chunkSource {
 	return chunkSource{data: data, index: index, total: int64(len(data))}
 }
 
-// streamSource は io.ReadSeeker に対する chunkSource を返します。
-// 末尾まで Seek して全体のバイト数を確かめます。
+// streamSource returns a chunkSource over an io.ReadSeeker.
+// It seeks to the end to learn the total size of the WAV.
 func streamSource(r io.ReadSeeker, index int) (chunkSource, error) {
 	total, err := r.Seek(0, io.SeekEnd)
 	if err != nil {
@@ -95,9 +101,10 @@ func streamSource(r io.ReadSeeker, index int) (chunkSource, error) {
 	return chunkSource{stream: r, index: index, total: total, buf: make([]byte, extensibleFormatChunkSize)}, nil
 }
 
-// readAt は offset から n バイトを返します。バイト列ならその部分スライスを、ストリームなら
-// 内部バッファへ読み込んだものを返すので、返り値は次の readAt まで有効です。
-// 呼び出し元は offset+n が total を超えないことと、n が buf に収まることを保証します。
+// readAt returns n bytes starting at offset. For a byte slice it returns a subslice, for
+// a stream it returns what was read into the internal buffer, so the result is valid
+// until the next readAt. The caller guarantees that offset+n does not exceed total and
+// that n fits in buf.
 func (s *chunkSource) readAt(offset, n int64) ([]byte, error) {
 	if s.stream == nil {
 		if offset < 0 || offset+n > int64(len(s.data)) {
@@ -112,7 +119,7 @@ func (s *chunkSource) readAt(offset, n int64) ([]byte, error) {
 	return buf, nil
 }
 
-// readFull は r の offset から buf を埋めるだけ読み込みます。
+// readFull reads from r at offset until buf is full.
 func readFull(r io.ReadSeeker, offset int64, buf []byte, index int) error {
 	if _, err := r.Seek(offset, io.SeekStart); err != nil {
 		return streamIOError(index, err)
@@ -124,12 +131,13 @@ func readFull(r io.ReadSeeker, offset int64, buf []byte, index int) error {
 }
 
 func streamIOError(index int, err error) error {
-	return fmt.Errorf("WAVファイル #%d の読み込みに失敗しました: %w", index, err)
+	return fmt.Errorf("read WAV file #%d: %w", index, err)
 }
 
-// extractAudioData は WAV ファイルからフォーマット情報と音声データ部分を抽出します。
-// fmt および data チャンクを動的に探索し、data チャンクの直前までを formatHeader とします。
-// index はエラーメッセージに含めるファイル位置で、一覧に属さない検証では -1 を渡します。
+// extractAudioData extracts the format and the audio data from a WAV file.
+// It searches for the fmt and data chunks dynamically and takes everything before the
+// data chunk as formatHeader. index is the file position included in error messages;
+// pass -1 for a check that does not belong to a list.
 func extractAudioData(wavBytes []byte, index int) (wavParts, error) {
 	src := bytesSource(wavBytes, index)
 	layout, err := scanWAV(&src)
@@ -144,17 +152,17 @@ func extractAudioData(wavBytes []byte, index int) (wavParts, error) {
 	}, nil
 }
 
-// scanWAV は WAV を走査し、フォーマットと data チャンクの位置を調べます。
+// scanWAV scans a WAV and finds its format and the position of its data chunk.
 //
-// 音声データそのものは読み込まず、RIFF ヘッダー・各チャンクのヘッダー・fmt チャンクの
-// ペイロードだけを読みます。読む量はどれも固定長なので、走査に必要なメモリは
-// 入力の大きさに依存しません。
+// It never reads the audio data itself, only the RIFF header, each chunk header and the
+// fmt chunk payload. Every read is of fixed length, so the memory scanning needs does not
+// depend on the size of the input.
 func scanWAV(src *chunkSource) (wavLayout, error) {
 	index, size := src.index, src.total
 	if size < wavRiffHeaderSize {
 		return wavLayout{}, &ErrInvalidWAVHeader{
 			Index:   index,
-			Details: fmt.Sprintf("WAVファイルサイズが短すぎます (RIFFヘッダー不足: %dバイト)", size),
+			Details: fmt.Sprintf("WAV file too short (incomplete RIFF header: %d bytes)", size),
 		}
 	}
 	riffHeader, err := src.readAt(0, wavRiffHeaderSize)
@@ -179,7 +187,8 @@ func scanWAV(src *chunkSource) (wavLayout, error) {
 
 		switch string(chunkHeader[:chunkIDSize]) {
 		case "fmt ":
-			// 拡張部まで含めても 40 バイト。宣言サイズと実際の残量のうち短い方まで読む。
+			// 40 bytes even with the extension. Read up to the shorter of the declared size
+			// and what actually remains.
 			payload, err := src.readAt(payloadStart, min(int64(chunkSize), extensibleFormatChunkSize, size-payloadStart))
 			if err != nil {
 				return wavLayout{}, err
@@ -197,7 +206,7 @@ func scanWAV(src *chunkSource) (wavLayout, error) {
 			if int64(chunkSize) > size-payloadStart {
 				return wavLayout{}, &ErrInvalidWAVHeader{
 					Index:   index,
-					Details: "dataチャンクのデータ長が実際のファイルサイズを超過しています",
+					Details: "data chunk length exceeds the actual file size",
 				}
 			}
 			return wavLayout{
@@ -221,31 +230,33 @@ func scanWAV(src *chunkSource) (wavLayout, error) {
 	return wavLayout{}, missingChunkError(index, "'fmt '", "'data'")
 }
 
-// validateRiffHeader は WAV データの RIFF/WAVE 識別子を検証します。header は先頭 12 バイトです。
+// validateRiffHeader validates the RIFF/WAVE identifiers of WAV data. header is the first
+// 12 bytes.
 func validateRiffHeader(header []byte, index int) error {
 	if string(header[:chunkIDSize]) != "RIFF" || string(header[chunkHeaderSize:wavRiffHeaderSize]) != "WAVE" {
 		return &ErrInvalidWAVHeader{
 			Index:   index,
-			Details: "RIFF/WAVE識別子が不正です",
+			Details: "invalid RIFF/WAVE identifier",
 		}
 	}
 	return nil
 }
 
-// parseFormatPayload は fmt チャンクのペイロードからフォーマットを読み出します。
-// declaredSize はチャンクヘッダーが宣言しているサイズで、payload はその先頭部分
-// （最大 extensibleFormatChunkSize バイト）です。
+// parseFormatPayload reads the format from a fmt chunk payload. declaredSize is the size
+// the chunk header declares, and payload is its leading part (at most
+// extensibleFormatChunkSize bytes).
 //
-// WAVE_FORMAT_EXTENSIBLE (AudioFormat = 0xFFFE) では実際の符号化方式もチャンネル配置も
-// 先頭 16 バイトには入っていないため、拡張部（チャンネルマスクとサブフォーマット GUID）
-// まで読み出します。ここを読まないと、リニア PCM と IEEE float が「どちらも 0xFFFE」
-// として一致扱いになります。
+// Under WAVE_FORMAT_EXTENSIBLE (AudioFormat = 0xFFFE) neither the actual encoding nor the
+// channel layout is in the first 16 bytes, so the extension (channel mask and sub-format
+// GUID) is read as well. Without it, linear PCM and IEEE float would match as "both
+// 0xFFFE".
 func parseFormatPayload(payload []byte, declaredSize uint32, index int) (Format, error) {
-	// PCM の fmt チャンクは 16 バイト。拡張形式はより長いが、先頭 16 バイトの並びは共通。
+	// A PCM fmt chunk is 16 bytes. The extensible one is longer, but shares the layout of
+	// the first 16 bytes.
 	if uint64(declaredSize) < minFormatChunkSize || len(payload) < minFormatChunkSize {
 		return Format{}, &ErrInvalidWAVHeader{
 			Index:   index,
-			Details: fmt.Sprintf("fmtチャンクが短すぎます (%dバイト、最低%dバイト必要)", declaredSize, minFormatChunkSize),
+			Details: fmt.Sprintf("fmt chunk too short (%d bytes, need at least %d bytes)", declaredSize, minFormatChunkSize),
 		}
 	}
 
@@ -262,23 +273,24 @@ func parseFormatPayload(payload []byte, declaredSize uint32, index int) (Format,
 	if uint64(declaredSize) < extensibleFormatChunkSize || len(payload) < extensibleFormatChunkSize {
 		return Format{}, &ErrInvalidWAVHeader{
 			Index:   index,
-			Details: fmt.Sprintf("拡張形式(WAVE_FORMAT_EXTENSIBLE)のfmtチャンクが短すぎます (%dバイト、最低%dバイト必要)", declaredSize, extensibleFormatChunkSize),
+			Details: fmt.Sprintf("WAVE_FORMAT_EXTENSIBLE fmt chunk too short (%d bytes, need at least %d bytes)", declaredSize, extensibleFormatChunkSize),
 		}
 	}
 	format.ValidBitsPerSample = binary.LittleEndian.Uint16(payload[18:])
 	format.ChannelMask = binary.LittleEndian.Uint32(payload[20:])
 	copy(format.SubFormat[:], payload[24:extensibleFormatChunkSize])
-	// 有効ビットは箱の上位に詰めて格納するので、箱より大きい値はありえない。
+	// Valid bits are packed into the top of the container, so a value larger than the
+	// container is impossible.
 	if format.ValidBitsPerSample > format.BitsPerSample {
 		return Format{}, &ErrInvalidWAVHeader{
 			Index:   index,
-			Details: fmt.Sprintf("有効ビット数 (%d) が量子化ビット数 (%d) を超えています", format.ValidBitsPerSample, format.BitsPerSample),
+			Details: fmt.Sprintf("valid bits per sample (%d) exceed bits per sample (%d)", format.ValidBitsPerSample, format.BitsPerSample),
 		}
 	}
 	return format, format.verifySupported(index)
 }
 
-// nextChunkOffset は WAV チャンクのパディングを考慮して次のチャンク位置を返します。
+// nextChunkOffset returns the position of the next chunk, accounting for WAV chunk padding.
 func nextChunkOffset(offset uint64, chunkSize uint32) uint64 {
 	nextOffset := offset + uint64(chunkHeaderSize) + uint64(chunkSize)
 	if chunkSize%2 != 0 {
@@ -287,10 +299,10 @@ func nextChunkOffset(offset uint64, chunkSize uint32) uint64 {
 	return nextOffset
 }
 
-// missingChunkError は不足している必須チャンクを示すエラーを作成します。
+// missingChunkError builds the error naming the required chunks that are missing.
 func missingChunkError(index int, missing ...string) error {
 	return &ErrInvalidWAVHeader{
 		Index:   index,
-		Details: fmt.Sprintf("WAVファイル内に必要なチャンク (%s) が見つかりませんでした", strings.Join(missing, "と")),
+		Details: fmt.Sprintf("required chunk (%s) not found in WAV file", strings.Join(missing, " and ")),
 	}
 }

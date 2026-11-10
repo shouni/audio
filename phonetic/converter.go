@@ -1,4 +1,5 @@
-// Package phonetic は、日本語テキストを形態素解析し、音声合成に適した読み（カタカナ）へ変換します。
+// Package phonetic analyses Japanese text morphologically and converts it into a reading
+// (katakana) suited to speech synthesis.
 package phonetic
 
 import (
@@ -16,67 +17,75 @@ import (
 //go:embed reading_overrides.json
 var defaultReadingOverridesJSON []byte
 
-// Converter は日本語テキストを音声合成に適した読み（カタカナ）へ変換します。
+// Converter converts Japanese text into a reading (katakana) suited to speech synthesis.
 //
-// Converter は形態素解析器の辞書読みを基にしつつ、助詞「は」「へ」「を」の
-// 発音補正と、表層形に対する読みの上書きを適用します。
+// Converter starts from the morphological analyser's dictionary readings, then applies the
+// pronunciation correction for the particles 「は」「へ」「を」 and the reading overrides
+// keyed by surface form.
 //
-// 生成後に内部状態を変更しないため、1つの Converter を複数のゴルーチンから
-// 同時に利用できます（Option による設定は生成時のみ有効です）。
+// It never changes its internal state after construction, so one Converter can be used
+// from several goroutines at once (options take effect only at construction).
 type Converter struct {
 	t                *tokenizer.Tokenizer
 	readingOverrides map[string]string
-	// overrideIndex は readingOverrides のキーを最長一致で引くための索引です。
+	// overrideIndex looks up the keys of readingOverrides by longest match.
 	overrideIndex prefixIndex
 	phraseSpacing bool
 	numberReading bool
-	// optionErr は Option の適用中に起きたエラーです。Option は値を返さないため、
-	// ここに預けて NewConverter がまとめて返します。
+	// optionErr is an error raised while applying an Option. Options return nothing, so
+	// the error is parked here and NewConverter returns it.
 	optionErr error
 }
 
-// Option は Converter の生成時に変換動作を調整する関数です。
+// Option is a function that adjusts conversion when a Converter is constructed.
 type Option func(*Converter)
 
-// defaultReadingOverrides は標準で適用する表層形ごとの読み上書きです。
+// defaultReadingOverrides are the per-surface-form reading overrides applied by default.
 var defaultReadingOverrides = mustLoadReadingOverridesJSON(defaultReadingOverridesJSON)
 
-// particleReadings は、助詞として使われたときに表記と発音が異なる表層形の読みです。
+// particleReadings are the readings of surface forms that are pronounced differently from
+// how they are written when used as particles.
 var particleReadings = map[string]string{
 	"は": "ワ",
 	"へ": "エ",
 	"を": "オ",
 }
 
-// WithPhraseSpacing は文節境界（助詞・助動詞の直後）にスペースを挿入する Option を返します。
+// WithPhraseSpacing returns an Option that inserts a space at phrase boundaries (right
+// after a particle or auxiliary verb).
 func WithPhraseSpacing() Option {
 	return func(c *Converter) {
 		c.phraseSpacing = true
 	}
 }
 
-// WithNumberReading は算用数字を日本語の読みへ変換する Option を返します。
+// WithNumberReading returns an Option that converts Arabic numerals into Japanese readings.
 //
-// 形態素解析器の辞書は算用数字に読みを持たないため、既定では "2026年8月" が
-// "2026ネン8ツキ" になります。この Option を付けると "ニセンニジュウロクネンハチガツ"
-// のように、数の読みと助数詞の音の変化（一回→イッカイ、三本→サンボン）まで当てます。
+// The morphological analyser's dictionary has no readings for Arabic numerals, so by
+// default "2026年8月" becomes "2026ネン8ツキ". With this Option it becomes
+// "ニセンニジュウロクネンハチガツ": the number is read, and so is the sound change at the
+// counter (一回→イッカイ, 三本→サンボン).
 //
-// 漢数字は辞書が単独では読めるので、助数詞が続いて音の変化が要るときだけ読みます
-// （"三本" → サンボン、"二人" → フタリ）。数の直後にない助数詞には影響しません。
-// 先頭が 0 の並び（"007"）と小数点以下は、桁として読まずに 1 文字ずつ読みます。
+// The dictionary can read kanji numerals on their own, so they are read here only when a
+// counter follows and a sound change is needed ("三本" → サンボン, "二人" → フタリ).
+// Counters not directly after a number are unaffected. Runs with a leading 0 ("007") and
+// digits after a decimal point are read one character at a time rather than as place
+// values.
 func WithNumberReading() Option {
 	return func(c *Converter) {
 		c.numberReading = true
 	}
 }
 
-// WithReadingOverridesJSON は JSON から読みの上書きを読み込んで追加する Option を返します。
+// WithReadingOverridesJSON returns an Option that loads reading overrides from JSON and
+// adds them.
 //
-// data は表層形をキー、読みを値にしたオブジェクトです（同梱の
-// reading_overrides.json と同じ形式）。プロジェクト固有の辞書を Go のコードに
-// 書き写さずに読み込むために使います。
+// data is an object with surface forms as keys and readings as values (the same format as
+// the bundled reading_overrides.json). Use it to load a project-specific dictionary
+// without copying it into Go code.
 //
-// JSON が壊れている場合や空のキー・値を含む場合は、NewConverter がエラーを返します。
+// When the JSON is malformed or contains an empty key or value, NewConverter returns an
+// error.
 func WithReadingOverridesJSON(data []byte) Option {
 	return func(c *Converter) {
 		overrides, err := loadReadingOverridesJSON(data)
@@ -88,11 +97,11 @@ func WithReadingOverridesJSON(data []byte) Option {
 	}
 }
 
-// WithReadingOverrides は表層形に対する読みの上書きを追加する Option を返します。
+// WithReadingOverrides returns an Option that adds reading overrides keyed by surface form.
 //
-// overrides のキーは入力文字列中の表層形、値はその表層形に対応する読みです。
-// 空文字のキーまたは値は無視されます。既存の上書きと同じ表層形を指定した場合は、
-// 指定した読みで置き換えます。
+// The keys of overrides are surface forms in the input, the values their readings.
+// Entries with an empty key or value are ignored. A surface form that already has an
+// override is replaced with the given reading.
 func WithReadingOverrides(overrides map[string]string) Option {
 	return func(c *Converter) {
 		for surface, reading := range overrides {
@@ -105,9 +114,9 @@ func WithReadingOverrides(overrides map[string]string) Option {
 	}
 }
 
-// WithoutDefaultReadingOverrides は同梱の標準読み上書きを外し、辞書読みだけを
-// 使う Option を返します。WithReadingOverrides と併用する場合は、この Option を
-// 先に指定してください（Option は指定順に適用されます）。
+// WithoutDefaultReadingOverrides returns an Option that drops the bundled default reading
+// overrides and uses dictionary readings only. When combining it with WithReadingOverrides,
+// pass this Option first (options are applied in the order given).
 func WithoutDefaultReadingOverrides() Option {
 	return func(c *Converter) {
 		c.readingOverrides = map[string]string{}
@@ -115,9 +124,9 @@ func WithoutDefaultReadingOverrides() Option {
 	}
 }
 
-// NewConverter は新しい Converter を生成します。
+// NewConverter creates a new Converter.
 //
-// options は標準の読み上書きを設定した後に順番に適用されます。
+// options are applied in order after the default reading overrides are set.
 func NewConverter(options ...Option) (*Converter, error) {
 	t, err := tokenizer.New(ipa.Dict(), tokenizer.OmitBosEos())
 	if err != nil {
@@ -137,20 +146,24 @@ func NewConverter(options ...Option) (*Converter, error) {
 	return c, nil
 }
 
-// ConvertToReading は input をカタカナの読みに変換します。
+// ConvertToReading converts input into a katakana reading.
 //
-// 入力は改行で行に分割し、行ごとに形態素解析します。改行を跨いで一括解析すると、
-// 行頭の語が直前の記号・未知語（英語タグ等）の文脈に引きずられて分割が変わるためです
-// （例: "[Chorus]\n重なる" を一括で解析すると 重なる が 重/なる に割れてオモナルになる）。
-// 歌詞では行が文の単位なので、行単位の解析が品詞判定としても正しくなります。
+// The input is split into lines and each line is analysed separately. Analysing across
+// newlines lets a line-initial word be dragged by the context of the preceding symbols or
+// unknown words (English tags and the like) and split differently (for example, analysing
+// "[Chorus]\n重なる" as one piece splits 重なる into 重/なる, read オモナル). In lyrics a
+// line is the unit of a sentence, so analysing by line is also what gets the parts of
+// speech right.
 //
-// 改行文字は入力のまま（CRLF なら CRLF のまま）出力へ引き継ぎます。
+// Line terminators are carried into the output as they were in the input (CRLF stays
+// CRLF).
 //
-// 読みを呼び出し側で決めたい語は、カタカナで渡してください。カタカナの語は1つの名詞として
-// 解析され、そのまま読みになります。ひらがなだけで書いた語は、「へ」「を」で始まると先頭が
-// 助詞として切り出され、助詞の発音補正がかかります（"へいそうする" → エ イソウスル、
-// "へいわな街" は後ろの 街 までガイと読まれる）。ひらがなの「へ」が助詞か語の頭かは
-// 文字だけでは決められないため、この変換の側では直せません。
+// Pass words whose reading the caller wants to decide in katakana. A katakana word is
+// analysed as one noun and comes back as its own reading. A word written in hiragana only
+// that starts with 「へ」 or 「を」 has its first sound split off as a particle and gets the
+// particle correction ("へいそうする" → エ イソウスル; in "へいわな街" the following 街 is
+// read ガイ as well). Whether a hiragana 「へ」 is a particle or the start of a word cannot
+// be told from the characters alone, so this conversion cannot fix it.
 func (c *Converter) ConvertToReading(input string) string {
 	var sb strings.Builder
 	sb.Grow(len(input) * 2)
@@ -162,10 +175,11 @@ func (c *Converter) ConvertToReading(input string) string {
 	return sb.String()
 }
 
-// splitLineTerminator は行を本文と改行文字に分けます。
+// splitLineTerminator splits a line into its body and its line terminator.
 //
-// CRLF の \r を本文に残したまま解析すると、トークナイザが未知語として拾って読みに
-// 混ざり、文節スペースの末尾トリムも \r に阻まれて効かなくなります。
+// Analysing with the \r of a CRLF left in the body makes the tokenizer pick it up as an
+// unknown word that leaks into the reading, and the \r also blocks the trailing trim of
+// phrase spacing.
 func splitLineTerminator(line string) (body, terminator string) {
 	body, ok := strings.CutSuffix(line, "\n")
 	if !ok {
@@ -177,15 +191,17 @@ func splitLineTerminator(line string) (body, terminator string) {
 	return body, "\n"
 }
 
-// convertLine は1行分のテキストをカタカナの読みに変換します。
+// convertLine converts one line of text into a katakana reading.
 //
-// 変換は行全体を一度だけ形態素解析し、その結果に読み上書きを重ねる順序で行います。
-// 上書きを先に適用して入力を分断すると、残った断片が文脈を失った状態で解析され、
-// 品詞が誤判定されます（例: 「運命の閃光が」の「が」は、単独で解析すると助詞ではなく
-// 接続詞になり、助詞前提の読み補正と文節スペースが両方とも外れる）。
+// It tokenizes the whole line once and then lays the reading overrides on top of the
+// result, in that order. Applying the overrides first would cut the input into fragments
+// that are then analysed without context, and the parts of speech come out wrong (for
+// example, the 「が」 in 「運命の閃光が」 is taken as a conjunction rather than a particle
+// once isolated, which drops both the particle correction and the phrase spacing).
 //
-// 読み上書きは形態素の境界で始まり境界で終わる一致だけを採用します。境界をまたぐ一致まで
-// 拾うと、上書きが覆い切れなかった残りの文字が欠落します（例: 「世界観」に対する「世界」）。
+// Only override matches that start and end on a morpheme boundary are taken. A match that
+// crosses a boundary drops whatever characters the override failed to cover (for example
+// 「世界」 against 「世界観」).
 func (c *Converter) convertLine(input string) string {
 	if input == "" {
 		return ""
@@ -202,8 +218,9 @@ func (c *Converter) convertLine(input string) string {
 
 		surface, ok := c.overrideIndex.match(input, token.Position, boundaries)
 		if !ok {
-			// 読み上書きの次に数を見る。上書きを先に見るのは、利用者が明示した読みが
-			// 常に勝つべきだからで、数の読みは辞書と同じく既定の解釈にすぎない。
+			// Numbers come after the reading overrides. Overrides go first because a reading
+			// the user stated must always win; a number's reading is, like the dictionary's,
+			// only the default interpretation.
 			if numberReading, next, matched := c.matchNumberAt(input, tokens, i, boundaries); matched {
 				sb.WriteString(numberReading)
 				c.writePhraseBreak(&sb, tokens[next-1].POS())
@@ -218,7 +235,7 @@ func (c *Converter) convertLine(input string) string {
 		}
 
 		sb.WriteString(c.readingOverrides[surface])
-		// 上書きが覆ったトークンをまとめて読み飛ばし、文節スペースは末尾のトークンで判定する。
+		// Skip every token the override covered, and decide phrase spacing by the last of them.
 		end := token.Position + len(surface)
 		last := i
 		for i < len(tokens) && tokens[i].Position < end {
@@ -235,14 +252,15 @@ func (c *Converter) convertLine(input string) string {
 	return result
 }
 
-// writePhraseBreak は、文節境界のトークン直後にスペースを書き込みます。
+// writePhraseBreak writes a space right after a token at a phrase boundary.
 func (c *Converter) writePhraseBreak(sb *strings.Builder, pos []string) {
 	if c.phraseSpacing && isPhraseBreak(pos) {
 		sb.WriteByte(' ')
 	}
 }
 
-// tokenBoundaries は、各トークンの開始バイト位置と入力末尾から成る境界集合を返します。
+// tokenBoundaries returns the set of boundaries: the start byte offset of every token, plus
+// the end of the input.
 func tokenBoundaries(input string, tokens []tokenizer.Token) map[int]struct{} {
 	boundaries := make(map[int]struct{}, len(tokens)+1)
 	for _, token := range tokens {
@@ -252,19 +270,19 @@ func tokenBoundaries(input string, tokens []tokenizer.Token) map[int]struct{} {
 	return boundaries
 }
 
-// rebuildOverrideKeys は読み上書きのキーから索引を組み直します。
+// rebuildOverrideKeys rebuilds the index from the keys of the reading overrides.
 func (c *Converter) rebuildOverrideKeys() {
 	c.overrideIndex = newPrefixIndex(slices.Collect(maps.Keys(c.readingOverrides)))
 }
 
-// cloneReadingOverrides は読み上書きのマップを複製します。
+// cloneReadingOverrides copies a map of reading overrides.
 func cloneReadingOverrides(overrides map[string]string) map[string]string {
 	cloned := make(map[string]string, len(overrides))
 	maps.Copy(cloned, overrides)
 	return cloned
 }
 
-// mustLoadReadingOverridesJSON は同梱JSONから読み上書きを読み込みます。
+// mustLoadReadingOverridesJSON loads the reading overrides from the bundled JSON.
 func mustLoadReadingOverridesJSON(data []byte) map[string]string {
 	overrides, err := loadReadingOverridesJSON(data)
 	if err != nil {
@@ -273,7 +291,7 @@ func mustLoadReadingOverridesJSON(data []byte) map[string]string {
 	return overrides
 }
 
-// loadReadingOverridesJSON は表層形をキー、読みを値にしたJSONを読み込みます。
+// loadReadingOverridesJSON loads JSON with surface forms as keys and readings as values.
 func loadReadingOverridesJSON(data []byte) (map[string]string, error) {
 	var overrides map[string]string
 	if err := json.Unmarshal(data, &overrides); err != nil {
@@ -293,8 +311,8 @@ func validReadingOverride(surface, reading string) bool {
 	return surface != "" && reading != ""
 }
 
-// tokenReading は1トークンの辞書読みを返し、助詞の発音を補正します。
-// pos はそのトークンの品詞階層（token.POS()）です。
+// tokenReading returns the dictionary reading of one token, with the particle
+// pronunciation corrected. pos is the token's part-of-speech hierarchy (token.POS()).
 func tokenReading(token tokenizer.Token, pos []string) string {
 	if corrected, ok := particleReading(token, pos); ok {
 		return corrected
@@ -302,8 +320,9 @@ func tokenReading(token tokenizer.Token, pos []string) string {
 	return dictionaryReading(token)
 }
 
-// dictionaryReading は辞書の読みを返します。辞書に読みがない語（未知語や記号）は
-// 表層形で代用しますが、出力の契約はカタカナなので、ひらがなだけはカタカナへ正規化します。
+// dictionaryReading returns the dictionary reading. A word the dictionary has no reading
+// for (an unknown word or a symbol) falls back to its surface form, but since the output
+// contract is katakana, hiragana is normalized to katakana.
 func dictionaryReading(token tokenizer.Token) string {
 	reading, ok := token.Reading()
 	if !ok || reading == "*" {
@@ -312,8 +331,8 @@ func dictionaryReading(token tokenizer.Token) string {
 	return reading
 }
 
-// hiraganaToKatakana は文字列中のひらがなを対応するカタカナに写します。
-// それ以外の文字（カタカナ・漢字・英数字・記号）は変更しません。
+// hiraganaToKatakana maps the hiragana in a string to the corresponding katakana.
+// Every other character (katakana, kanji, alphanumerics, symbols) is left unchanged.
 func hiraganaToKatakana(s string) string {
 	if !strings.ContainsFunc(s, isConvertibleHiragana) {
 		return s
@@ -326,21 +345,23 @@ func hiraganaToKatakana(s string) string {
 	}, s)
 }
 
-// hiraganaToKatakanaOffset は Unicode 上のひらがな・カタカナブロック間の距離です。
+// hiraganaToKatakanaOffset is the distance between the hiragana and katakana blocks in
+// Unicode.
 const hiraganaToKatakanaOffset = 'ア' - 'あ'
 
-// isConvertibleHiragana は、対応するカタカナが存在するひらがなかを判定します。
-// ぁ (U+3041) 〜 ゖ (U+3096) と、繰り返し記号 ゝ ゞ が対象です。
+// isConvertibleHiragana reports whether r is a hiragana that has a katakana counterpart:
+// ぁ (U+3041) through ゖ (U+3096), plus the iteration marks ゝ and ゞ.
 func isConvertibleHiragana(r rune) bool {
 	return (r >= 'ぁ' && r <= 'ゖ') || r == 'ゝ' || r == 'ゞ'
 }
 
-// isPhraseBreak は、品詞階層の先頭（大分類）が文節の切れ目になる品詞かを判定します。
+// isPhraseBreak reports whether the top level of the part-of-speech hierarchy is one that
+// ends a phrase.
 func isPhraseBreak(pos []string) bool {
 	return len(pos) > 0 && (pos[0] == "助詞" || pos[0] == "助動詞")
 }
 
-// particleReading は、助詞として使われた「は」「へ」「を」の発音を返します。
+// particleReading returns the pronunciation of 「は」「へ」「を」 used as a particle.
 func particleReading(token tokenizer.Token, pos []string) (string, bool) {
 	if len(pos) == 0 || pos[0] != "助詞" {
 		return "", false

@@ -2,30 +2,31 @@ package wav
 
 import "time"
 
-// Info は WAV バイナリから読み取ったフォーマットと音声データの概要です。
+// Info summarizes the format and audio data read from a WAV binary.
 type Info struct {
-	// Format は fmt チャンクの内容です。
+	// Format is the content of the fmt chunk.
 	Format Format
-	// DataSize は data チャンクのペイロードのバイト数です。
+	// DataSize is the number of bytes in the data chunk payload.
 	DataSize int
 }
 
-// Duration は音声データの再生時間を返します。
-// フォーマット値から1秒あたりのバイト数が計算できない場合 (0 になる場合) は 0 を返します。
+// Duration returns the playback duration of the audio data.
+// It returns 0 when the format values do not yield a byte rate (when it would be 0).
 func (i Info) Duration() time.Duration {
 	rate := i.Format.byteRate()
 	if rate == 0 || i.DataSize <= 0 {
 		return 0
 	}
-	// 整数のまま計算する。浮動小数点を経由すると、サンプル境界ちょうどの長さでも
-	// 1ns 単位の誤差が乗ることがある。
+	// Compute in integers. Going through floating point can add a 1ns error even for a
+	// length that falls exactly on a sample boundary.
 	return time.Duration(mulDiv(uint64(i.DataSize), uint64(time.Second), rate))
 }
 
-// Inspect は WAV バイナリを解析し、フォーマットと音声データの概要を返します。
-// CombineWavData と同じ検証 (RIFF/WAVE 識別子、fmt/data チャンクの存在とサイズ) を
-// 行うため、結合前の事前チェックや再生時間の見積もりに使えます。
-// ADPCM などデコードせずに繋げない形式は *ErrUnsupportedWAVFormat を返します。
+// Inspect parses a WAV binary and returns a summary of its format and audio data.
+// It runs the same validation as CombineWavData (RIFF/WAVE identifiers, presence and size
+// of the fmt/data chunks), so it can serve as a pre-check before combining or to estimate
+// a duration. Formats that cannot be joined without decoding, such as ADPCM, return
+// *ErrUnsupportedWAVFormat.
 func Inspect(wavBytes []byte) (Info, error) {
 	parts, err := extractAudioData(wavBytes, -1)
 	if err != nil {

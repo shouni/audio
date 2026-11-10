@@ -10,38 +10,42 @@ import (
 	"github.com/ikawaha/kagome/v2/tokenizer"
 )
 
-// 数詞の読みは、形態素解析器の辞書だけでは作れません。IPA 辞書は算用数字に読みを持たず
-// （"2026" の読みは "*" になります）、助数詞は数と切り離された単独の読み（"月" なら "ツキ"）
-// しか持たないためです。そのまま出力すると "2026年8月" が "2026ネン8ツキ" になり、
-// 「出力はカタカナ」という契約も、月の読み（ハチガツ）も同時に崩れます。
+// Number readings cannot be built from the morphological analyser's dictionary alone. The
+// IPA dictionary has no readings for Arabic numerals (the reading of "2026" comes out as
+// "*"), and it has only the standalone reading of a counter, detached from any number
+// ("ツキ" for "月"). Output as is, "2026年8月" becomes "2026ネン8ツキ", breaking both the
+// "output is katakana" contract and the reading of the month (ハチガツ).
 //
-// このファイルは、数の並びを日本語の読みに直し、続く助数詞との間に起きる促音便・連濁・
-// 半濁音化（一回→イッカイ、三本→サンボン、六分→ロップン）を当てる処理をまとめます。
+// This file turns runs of digits into Japanese readings and applies the sound changes at
+// the join with a following counter: gemination, rendaku voicing and handakuten
+// (一回→イッカイ, 三本→サンボン, 六分→ロップン).
 //
-// 漢数字も同じ規則で扱います。辞書は漢数字そのものは読めますが（三 → サン）、助数詞との
-// 境目の音の変化は持たないため、"三本" は サンホン、"一階" は イチカイ になります。
-// 算用数字と違って単独の漢数字は辞書読みで足りるので、助数詞が続くときだけ引き受けます。
+// Kanji numerals follow the same rules. The dictionary can read a kanji numeral itself
+// (三 → サン) but not the sound change at the counter, so "三本" comes out サンホン and
+// "一階" イチカイ. Unlike Arabic numerals, a kanji numeral on its own is fine with the
+// dictionary reading, so they are taken over only when a counter follows.
 
-// digitReadings は算用数字 1 文字ぶんの読みです。
+// digitReadings are the readings of a single Arabic digit.
 var digitReadings = [10]string{"ゼロ", "イチ", "ニ", "サン", "ヨン", "ゴ", "ロク", "ナナ", "ハチ", "キュウ"}
 
-// numeral は数の並びから読み取った読みと値です。
+// numeral is the reading and value read from a run of digits.
 type numeral struct {
-	// reading は数そのものの読みです。
+	// reading is the reading of the number itself.
 	reading string
-	// value は数値です。hasValue が false のときは意味を持ちません。
+	// value is the numeric value. It is meaningless when hasValue is false.
 	value uint64
-	// hasValue は value を助数詞の特殊読み（4日→ヨッカ等）の判定に使えるかを表します。
-	// 小数、先頭が 0 の並び、uint64 に収まらない桁数では false になります。
+	// hasValue reports whether value can be used to pick a counter's irregular reading
+	// (4日→ヨッカ and so on). It is false for decimals, runs with a leading 0, and digit
+	// counts that do not fit in a uint64.
 	hasValue bool
 }
 
-// readNumeral は算用数字の並び（"1234"、"3.5"）を読みに変換します。
+// readNumeral converts a run of Arabic digits ("1234", "3.5") into a reading.
 func readNumeral(digits string) numeral {
 	integer, fraction, hasFraction := strings.Cut(digits, ".")
 
-	// 先頭の 0 は数量ではなく符号や識別子（"007"、"0120"）のことが多いので、
-	// 桁として読まずに 1 文字ずつ読みます。
+	// A leading 0 usually marks a code or identifier ("007", "0120") rather than a
+	// quantity, so read it one character at a time instead of by place value.
 	if integer == "" || (len(integer) > 1 && integer[0] == '0') {
 		return numeral{reading: readDigitsOneByOne(digits)}
 	}
@@ -54,11 +58,12 @@ func readNumeral(digits string) numeral {
 	if !hasFraction {
 		return numeral{reading: reading, value: value, hasValue: true}
 	}
-	// 小数点以下は桁ではなく 1 文字ずつ読む（3.14 → サンテンイチヨン）。
+	// Digits after the decimal point are read one at a time, not by place value
+	// (3.14 → サンテンイチヨン).
 	return numeral{reading: reading + "テン" + readDigitsOneByOne(fraction)}
 }
 
-// readDigitsOneByOne は数字を 1 文字ずつ読みます。
+// readDigitsOneByOne reads digits one character at a time.
 func readDigitsOneByOne(digits string) string {
 	var sb strings.Builder
 	sb.Grow(len(digits) * 6)
@@ -74,7 +79,8 @@ func readDigitsOneByOne(digits string) string {
 	return sb.String()
 }
 
-// scaleUnits は 4 桁ごとの位取りの単位です。索引は下から数えた桁グループの番号です。
+// scaleUnits are the place units for each group of 4 digits. The index is the number of
+// the digit group counted from the bottom.
 var scaleUnits = [...]struct {
 	reading string
 	class   soundClass
@@ -86,7 +92,7 @@ var scaleUnits = [...]struct {
 	{"ケイ", soundK},  // 一京 → イッケイ
 }
 
-// readInteger は整数を読みに変換します。
+// readInteger converts an integer into a reading.
 func readInteger(value uint64) string {
 	if value == 0 {
 		return digitReadings[0]
@@ -113,8 +119,9 @@ func readInteger(value uint64) string {
 	return sb.String()
 }
 
-// readGroup は 1〜9999 の読みを組み立てます。
-// scaled は上に万・億などの位が続くかで、千の位の読み方（セン／イッセン）を決めます。
+// readGroup builds the reading of 1-9999.
+// scaled says whether a higher unit such as 万 or 億 follows, which decides how the
+// thousands are read (セン or イッセン).
 func readGroup(n int, scaled bool) string {
 	var sb strings.Builder
 	if d := n / 1000; d > 0 {
@@ -132,8 +139,8 @@ func readGroup(n int, scaled bool) string {
 	return sb.String()
 }
 
-// readThousands は千の位を読みます。1000 は「イチセン」ではなく「セン」ですが、
-// 万・億が続くときは「一千万」のように イッセン と読みます（一千万→イッセンマン）。
+// readThousands reads the thousands digit. 1000 is 「セン」, not 「イチセン」, but when
+// 万 or 億 follows it is read イッセン, as in 「一千万」 (一千万→イッセンマン).
 func readThousands(d int, scaled bool) string {
 	switch d {
 	case 1:
@@ -150,7 +157,7 @@ func readThousands(d int, scaled bool) string {
 	}
 }
 
-// readHundreds は百の位を読みます。
+// readHundreds reads the hundreds digit.
 func readHundreds(d int) string {
 	switch d {
 	case 1:
@@ -166,7 +173,7 @@ func readHundreds(d int) string {
 	}
 }
 
-// readTens は十の位を読みます。10 は「イチジュウ」ではなく「ジュウ」です。
+// readTens reads the tens digit. 10 is 「ジュウ」, not 「イチジュウ」.
 func readTens(d int) string {
 	if d == 1 {
 		return "ジュウ"
@@ -174,29 +181,31 @@ func readTens(d int) string {
 	return digitReadings[d] + "ジュウ"
 }
 
-// soundClass は、直前の数によって助数詞の頭がどう変わるかの分類です。
+// soundClass classifies how the start of a counter changes with the number before it.
 type soundClass int
 
 const (
-	// soundPlain は音が変わらない助数詞です（枚、年、円、台）。
+	// soundPlain is a counter whose sound does not change (枚, 年, 円, 台).
 	soundPlain soundClass = iota
-	// soundK はカ行の助数詞です（回、個、曲）。一回→イッカイ、六回→ロッカイ。
+	// soundK is a ka-row counter (回, 個, 曲). 一回→イッカイ, 六回→ロッカイ.
 	soundK
-	// soundKVoiced はカ行のうち、三で連濁する助数詞です（軒、階）。三軒→サンゲン、三階→サンガイ。
+	// soundKVoiced is a ka-row counter voiced after 三 (軒, 階). 三軒→サンゲン, 三階→サンガイ.
 	soundKVoiced
-	// soundS はサ行の助数詞です（冊、歳、週）。一冊→イッサツ、六冊はロクサツのまま。
+	// soundS is a sa-row counter (冊, 歳, 週). 一冊→イッサツ, while 六冊 stays ロクサツ.
 	soundS
-	// soundT はタ行の助数詞です（点、通、兆）。促音便の条件はサ行と同じです。
+	// soundT is a ta-row counter (点, 通, 兆). It geminates under the same conditions as the
+	// sa row.
 	soundT
-	// soundH はハ行のうち、三で連濁する助数詞です（本、匹、杯）。一本→イッポン、三本→サンボン。
+	// soundH is a ha-row counter voiced after 三 (本, 匹, 杯). 一本→イッポン, 三本→サンボン.
 	soundH
-	// soundP はハ行のうち、三で半濁音になる助数詞です（発、泊、編）。一発→イッパツ、三発→サンパツ。
+	// soundP is a ha-row counter that takes handakuten after 三 (発, 泊, 編). 一発→イッパツ,
+	// 三発→サンパツ.
 	soundP
-	// soundPYon は soundP に加えて四でも半濁音になる助数詞です（分）。四分→ヨンプン。
+	// soundPYon is like soundP but also takes handakuten after 四 (分). 四分→ヨンプン.
 	soundPYon
 )
 
-// tailKind は助数詞の直前に来る数の語尾の分類です。
+// tailKind classifies the ending of the number that comes right before a counter.
 type tailKind int
 
 const (
@@ -209,16 +218,17 @@ const (
 	tailTen
 	tailHundred
 	tailThousand
-	// tailMan は 万 で終わる数です。三と同じくハ行を濁らせます（百万本→ヒャクマンボン）。
+	// tailMan is a number ending in 万. Like 三, it voices the ha row (百万本→ヒャクマンボン).
 	tailMan
 )
 
-// numberTails は、促音便・連濁を起こす数の語尾です。
-// 百の位は連濁・半濁を受けた後の形（サンビャク、ロッピャク）でも語尾として拾えるように、
-// 濁点付きの綴りも並べます。
+// numberTails are the number endings that trigger gemination or voicing.
+// The voiced spellings are listed too, so that the hundreds are still recognized as an
+// ending after they have been voiced or taken handakuten themselves (サンビャク,
+// ロッピャク).
 var numberTails = []struct {
 	tail string
-	// geminated は促音便の形です。空文字は促音便を起こさない語尾です。
+	// geminated is the geminated form. An empty string means the ending does not geminate.
 	geminated string
 	kind      tailKind
 }{
@@ -236,18 +246,19 @@ var numberTails = []struct {
 	{"マン", "", tailMan},
 }
 
-// voicing は助数詞の頭に当てる濁り方です。
+// voicing is the voicing applied to the start of a counter.
 type voicing int
 
 const (
 	voicingNone voicing = iota
-	// voicingSemi は半濁音化です（ホン → ポン）。
+	// voicingSemi is handakuten (ホン → ポン).
 	voicingSemi
-	// voicingFull は連濁です（ホン → ボン）。
+	// voicingFull is rendaku voicing (ホン → ボン).
 	voicingFull
 )
 
-// joinWithSound は数の読みと助数詞をつなぎ、境目に起きる音の変化を当てます。
+// joinWithSound joins a number's reading and a counter, applying the sound change at the
+// join.
 func joinWithSound(number, counter string, class soundClass) string {
 	if counter == "" {
 		return number
@@ -261,7 +272,7 @@ func joinWithSound(number, counter string, class soundClass) string {
 	return number + applyVoicing(counter, voice)
 }
 
-// findNumberTail は数の読みの語尾を返します。
+// findNumberTail returns the ending of a number's reading.
 func findNumberTail(number string) (tail, geminated string, kind tailKind) {
 	for _, candidate := range numberTails {
 		if strings.HasSuffix(number, candidate.tail) {
@@ -271,7 +282,7 @@ func findNumberTail(number string) (tail, geminated string, kind tailKind) {
 	return "", "", tailNone
 }
 
-// soundChange は語尾と助数詞の組み合わせに対する音の変化を返します。
+// soundChange returns the sound change for a combination of ending and counter.
 func soundChange(kind tailKind, class soundClass) (geminate bool, voice voicing) {
 	switch class {
 	case soundK:
@@ -283,7 +294,7 @@ func soundChange(kind tailKind, class soundClass) (geminate bool, voice voicing)
 		}
 		return geminatesKRow(kind), voicingNone
 	case soundS, soundT:
-		// 一冊イッサツ 八冊ハッサツ 十冊ジュッサツ。六冊・百冊は変化しない。
+		// 一冊イッサツ 八冊ハッサツ 十冊ジュッサツ. 六冊 and 百冊 do not change.
 		return kind == tailOne || kind == tailEight || kind == tailTen, voicingNone
 	case soundH:
 		if geminatesKRow(kind) {
@@ -301,20 +312,22 @@ func soundChange(kind tailKind, class soundClass) (geminate bool, voice voicing)
 			return false, voicingSemi // 三発サンパツ 千発センパツ 一万発イチマンパツ
 		}
 		if kind == tailFour && class == soundPYon {
-			return false, voicingSemi // 四分ヨンプン。四発はヨンハツのまま。
+			return false, voicingSemi // 四分ヨンプン. 四発 stays ヨンハツ.
 		}
 		return false, voicingNone
 	}
 	return false, voicingNone
 }
 
-// geminatesKRow は、カ行・ハ行の助数詞が促音便を起こす語尾かを判定します。
-// 一・六・八・十・百が該当し、サ行・タ行より条件がひとつ広い（六回はロッカイ、六冊はロクサツ）。
+// geminatesKRow reports whether the ending makes a ka-row or ha-row counter geminate.
+// 一, 六, 八, 十 and 百 do, one more than for the sa and ta rows (六回 is ロッカイ, 六冊 is
+// ロクサツ).
 func geminatesKRow(kind tailKind) bool {
 	return kind == tailOne || kind == tailSix || kind == tailEight || kind == tailTen || kind == tailHundred
 }
 
-// voicedForms は連濁後のカタカナ、semiVoicedForms は半濁音化後のカタカナです。
+// voicedForms are the katakana after rendaku voicing, semiVoicedForms those after
+// handakuten.
 var (
 	voicedForms = map[rune]rune{
 		'カ': 'ガ', 'キ': 'ギ', 'ク': 'グ', 'ケ': 'ゲ', 'コ': 'ゴ',
@@ -327,7 +340,7 @@ var (
 	}
 )
 
-// applyVoicing は助数詞の先頭 1 文字に濁り方を当てます。
+// applyVoicing applies a voicing to the first character of a counter.
 func applyVoicing(counter string, voice voicing) string {
 	forms := voicedForms
 	switch voice {
@@ -345,25 +358,28 @@ func applyVoicing(counter string, voice voicing) string {
 	return string(voiced) + counter[size:]
 }
 
-// counter は助数詞 1 つぶんの読み方です。
+// counter is how one counter is read.
 type counter struct {
 	reading string
 	class   soundClass
-	// irregular は、音の変化では説明できない数ごとの読みです（4日→ヨッカ、1人→ヒトリ）。
-	// キーは数値、値は数と助数詞をまとめた読み全体です。
+	// irregular are per-number readings that sound changes cannot explain (4日→ヨッカ,
+	// 1人→ヒトリ). The key is the number, the value the whole reading of number plus
+	// counter.
 	irregular map[uint64]string
-	// digitOverrides は、この助数詞の直前でだけ変わる一の位の読みです（4人→ヨニン の「ヨ」）。
-	// この変化は一の位で決まるので、14人もジュウヨニンになります。値ごとの irregular では
-	// 4・14・24…と際限なく並べることになるため、桁ではなく一の位で持ちます。
+	// digitOverrides are readings of the ones digit that change only right before this
+	// counter (the 「ヨ」 of 4人→ヨニン). The change depends on the ones digit, so 14人 is
+	// ジュウヨニン too. Per-value irregular entries would mean listing 4, 14, 24… without
+	// end, so these are keyed by the ones digit instead.
 	digitOverrides map[uint64]string
-	// contextual は、助数詞の直後に続く語で読みが変わる場合の判定です（1日中→イチニチチュウ）。
-	// following は助数詞の直後のトークンで、文末なら nil です。読みを返さなければ通常の
-	// 規則に落ちます。nil なら使いません。
+	// contextual decides the reading when it depends on the word right after the counter
+	// (1日中→イチニチチュウ). following is the token right after the counter, or nil at the
+	// end of the sentence. If it returns no reading the normal rules apply. Unused when
+	// nil.
 	contextual func(n numeral, following *tokenizer.Token) (string, bool)
 }
 
-// read は数と助数詞をつないだ読みを返します。following は助数詞の直後のトークンで、
-// 文末なら nil です。
+// read returns the reading of the number joined with the counter. following is the token
+// right after the counter, or nil at the end of the sentence.
 func (c counter) read(n numeral, following *tokenizer.Token) string {
 	if c.contextual != nil {
 		if reading, ok := c.contextual(n, following); ok {
@@ -378,7 +394,8 @@ func (c counter) read(n numeral, following *tokenizer.Token) string {
 	return joinWithSound(c.overrideLastDigit(n), c.reading, c.class)
 }
 
-// overrideLastDigit は、助数詞の直前でだけ変わる一の位の読みを差し替えます。
+// overrideLastDigit swaps in the reading of the ones digit that changes only right before
+// the counter.
 func (c counter) overrideLastDigit(n numeral) string {
 	if !n.hasValue {
 		return n.reading
@@ -388,7 +405,8 @@ func (c counter) overrideLastDigit(n numeral) string {
 	if !ok {
 		return n.reading
 	}
-	// 一の位が語尾に現れていない読み（桁を1文字ずつ読んだ場合など）には手を出さない。
+	// Leave alone a reading that does not end in the ones digit (digits read one by one, for
+	// example).
 	standard := digitReadings[lastDigit]
 	if !strings.HasSuffix(n.reading, standard) {
 		return n.reading
@@ -396,12 +414,14 @@ func (c counter) overrideLastDigit(n numeral) string {
 	return n.reading[:len(n.reading)-len(standard)] + override
 }
 
-// counters は、数の直後に置かれたときに読みが変わる助数詞です。
+// counters are the counters whose reading changes when placed right after a number.
 //
-// ここに載せるのは「数と組んだときの読みが辞書の単独読みと違う」ものだけです。
-// 音の変化も特殊読みもない助数詞は、辞書の読みをそのまま使えば正しく読めます。
+// Only counters whose reading with a number differs from the dictionary's standalone
+// reading belong here. A counter with neither a sound change nor an irregular reading is
+// read correctly by the dictionary as is.
 var counters = map[string]counter{
-	// 時と日付。単独読みと大きく食い違うので特殊読みを持ちます。
+	// Time and dates. They differ widely from the standalone readings, so they carry
+	// irregular readings.
 	"年":  {reading: "ネン", digitOverrides: map[uint64]string{4: "ヨ"}},
 	"月":  {reading: "ガツ", irregular: monthReadings()},
 	"ヶ月": {reading: "カゲツ", class: soundK},
@@ -410,10 +430,11 @@ var counters = map[string]counter{
 	"カ月": {reading: "カゲツ", class: soundK},
 	"箇月": {reading: "カゲツ", class: soundK},
 	"日":  {reading: "ニチ", irregular: dayReadings, contextual: readFirstDayAsDuration},
-	// 「日間」「分間」は形態素解析器が 1 トークンにするため、「日」「分」の項目では拾えません。
+	// The analyser emits 「日間」 and 「分間」 as one token, so the 「日」 and 「分」 entries never
+	// see them.
 	"日間": {reading: "ニチカン", irregular: dayDurationReadings()},
 	"分間": {reading: "フンカン", class: soundPYon},
-	// 0時 は ゼロジ ではなく レイジ（時報や時刻表の読み）。
+	// 0時 is レイジ, not ゼロジ (as time signals and timetables read it).
 	"時":  {reading: "ジ", digitOverrides: map[uint64]string{4: "ヨ", 7: "シチ", 9: "ク"}, irregular: map[uint64]string{0: "レイジ"}},
 	"時間": {reading: "ジカン", digitOverrides: map[uint64]string{4: "ヨ", 9: "ク"}},
 	"分":  {reading: "フン", class: soundPYon},
@@ -421,7 +442,7 @@ var counters = map[string]counter{
 	"週":  {reading: "シュウ", class: soundS},
 	"週間": {reading: "シュウカン", class: soundS},
 
-	// 人と物。
+	// People and things.
 	"人": {
 		reading:        "ニン",
 		irregular:      map[uint64]string{1: "ヒトリ", 2: "フタリ"},
@@ -434,7 +455,7 @@ var counters = map[string]counter{
 	"歳": {reading: "サイ", class: soundS, irregular: map[uint64]string{20: "ハタチ"}},
 	"才": {reading: "サイ", class: soundS, irregular: map[uint64]string{20: "ハタチ"}},
 
-	// カ行。促音便だけが起きます。
+	// Ka row. Only gemination occurs.
 	"回": {reading: "カイ", class: soundK},
 	"個": {reading: "コ", class: soundK},
 	"件": {reading: "ケン", class: soundK},
@@ -445,7 +466,7 @@ var counters = map[string]counter{
 	"校": {reading: "コウ", class: soundK},
 	"階": {reading: "カイ", class: soundKVoiced},
 
-	// サ行・タ行。
+	// Sa and ta rows.
 	"冊":  {reading: "サツ", class: soundS},
 	"隻":  {reading: "セキ", class: soundS},
 	"足":  {reading: "ソク", class: soundS},
@@ -459,8 +480,9 @@ var counters = map[string]counter{
 	"着":  {reading: "チャク", class: soundT},
 	"体":  {reading: "タイ", class: soundT},
 
-	// ハ行。促音便に加えて連濁・半濁音化が起きます。三で濁るか半濁るかは助数詞ごとに違い、
-	// 三本サンボン・三杯サンバイに対して三発サンパツ・三泊サンパクになります。
+	// Ha row. Voicing or handakuten occurs on top of gemination. Whether 三 voices or takes
+	// handakuten depends on the counter: 三本サンボン and 三杯サンバイ, but 三発サンパツ and
+	// 三泊サンパク.
 	"本": {reading: "ホン", class: soundH},
 	"歩": {reading: "ホ", class: soundP},
 	"匹": {reading: "ヒキ", class: soundH},
@@ -471,7 +493,8 @@ var counters = map[string]counter{
 	"編": {reading: "ヘン", class: soundP},
 	"篇": {reading: "ヘン", class: soundP},
 
-	// 場所と単位。単位はカタカナ語でも促音便が起きます（一キロ→イッキロ、一セット→イッセット）。
+	// Places and units. Units geminate even as katakana words (一キロ→イッキロ,
+	// 一セット→イッセット).
 	"ヶ所":      {reading: "カショ", class: soundK},
 	"ケ所":      {reading: "カショ", class: soundK},
 	"か所":      {reading: "カショ", class: soundK},
@@ -488,7 +511,8 @@ var counters = map[string]counter{
 	"セット":     {reading: "セット", class: soundS},
 	"トン":      {reading: "トン", class: soundT},
 
-	// 和語で数える助数詞。一つ・二つだけは ヒト・フタ になり、三つ以降は漢語の数に戻ります。
+	// Counters counted with native Japanese numbers. Only one and two become ヒト and フタ;
+	// from three on they go back to Sino-Japanese numbers.
 	"組":  {reading: "クミ", class: soundK, irregular: map[uint64]string{1: "ヒトクミ", 2: "フタクミ"}},
 	"株":  {reading: "カブ", class: soundK, irregular: map[uint64]string{1: "ヒトカブ", 2: "フタカブ"}},
 	"切れ": {reading: "キレ", class: soundK, irregular: map[uint64]string{1: "ヒトキレ", 2: "フタキレ"}},
@@ -496,24 +520,27 @@ var counters = map[string]counter{
 	"粒":  {reading: "ツブ", class: soundT, irregular: map[uint64]string{1: "ヒトツブ", 2: "フタツブ"}},
 	"袋":  {reading: "フクロ", class: soundH, irregular: map[uint64]string{1: "ヒトフクロ", 2: "フタフクロ"}},
 
-	// 位取りの漢字のうち、促音便が起きる兆だけ。万・億は辞書の読みのままで正しく、
-	// 京は数としてまず使われず地名や熟語で誤爆する方が多いため入れていません。
+	// Of the place-value kanji, only 兆, which geminates. 万 and 億 are correct with the
+	// dictionary reading, and 京 is left out because it is hardly ever used as a number and
+	// would misfire on place names and compounds far more often.
 	"兆": {reading: "チョウ", class: soundT},
 
-	// 記号。半角の % は辞書が読みを持たないため、数の後ろでだけ読みを与えます
-	// （全角の ％ は辞書が読めるので不要）。
+	// Symbols. The dictionary has no reading for the half-width %, so it is given one only
+	// after a number (the full-width ％ is read by the dictionary and needs no entry).
 	"%": {reading: "パーセント"},
 }
 
-// dayReadings は日付の特殊読みです。1 日〜10 日と 14・20・24 日は数の読みから作れません。
+// dayReadings are the irregular readings of dates. Days 1-10 and 14, 20 and 24 cannot be
+// built from the number's reading.
 var dayReadings = map[uint64]string{
 	1: "ツイタチ", 2: "フツカ", 3: "ミッカ", 4: "ヨッカ", 5: "イツカ",
 	6: "ムイカ", 7: "ナノカ", 8: "ヨウカ", 9: "ココノカ", 10: "トオカ",
 	14: "ジュウヨッカ", 20: "ハツカ", 24: "ニジュウヨッカ",
 }
 
-// dayDurationReadings は「N日間」の読みです。日付の特殊読みに カン を付けますが、
-// 1 日間だけは ツイタチカン ではなく イチニチカン です（ツイタチ は日付専用の読み）。
+// dayDurationReadings are the readings of 「N日間」. They add カン to the irregular date
+// readings, except that 1日間 is イチニチカン, not ツイタチカン (ツイタチ is for dates
+// only).
 func dayDurationReadings() map[uint64]string {
 	readings := make(map[uint64]string, len(dayReadings))
 	for value, reading := range dayReadings {
@@ -523,17 +550,19 @@ func dayDurationReadings() map[uint64]string {
 	return readings
 }
 
-// durationSuffixes は、「1日」の直後に来ると日付ではなく期間（イチニチ）を表す語です。
+// durationSuffixes are the words that, right after 「1日」, make it a duration (イチニチ)
+// rather than a date.
 var durationSuffixes = map[string]bool{
 	"中": true, "目": true, "間": true, "後": true, "前": true, "半": true,
 	"おき": true, "置き": true, "あたり": true, "当たり": true, "当り": true,
 	"ごと": true, "毎": true, "以内": true, "以上": true, "以下": true, "分": true,
 }
 
-// readFirstDayAsDuration は、「1日」が日付（ツイタチ）ではなく期間（イチニチ）を表す文脈を
-// 見分けます。単独の「1日」や「8月1日」は日付なのでツイタチのままにし、直後に期間を表す語
-// （1日中、1日目、1日おき）か数（1日3回）が続くときだけイチニチと読みます。
-// 漢数字の「一日」は辞書が 1 語で読むのでここへは来ません（読み上書き側で守っています）。
+// readFirstDayAsDuration tells the contexts where 「1日」 is a duration (イチニチ) rather
+// than a date (ツイタチ). 「1日」 alone or in 「8月1日」 is a date and stays ツイタチ; only
+// when a duration word (1日中, 1日目, 1日おき) or a number (1日3回) follows is it read
+// イチニチ. The kanji 「一日」 never gets here because the dictionary reads it as one word
+// (the reading overrides take care of it).
 func readFirstDayAsDuration(n numeral, following *tokenizer.Token) (string, bool) {
 	if !n.hasValue || n.value != 1 || following == nil {
 		return "", false
@@ -544,8 +573,8 @@ func readFirstDayAsDuration(n numeral, following *tokenizer.Token) (string, bool
 	return "", false
 }
 
-// monthReadings は 1 月〜12 月の読みです。4 月シガツ・7 月シチガツ・9 月クガツ は、
-// 数の既定の読み（ヨン・ナナ・キュウ）では作れません。
+// monthReadings are the readings of months 1-12. 4月シガツ, 7月シチガツ and 9月クガツ
+// cannot be built from the default number readings (ヨン, ナナ, キュウ).
 func monthReadings() map[uint64]string {
 	names := [...]string{
 		1: "イチ", 2: "ニ", 3: "サン", 4: "シ", 5: "ゴ", 6: "ロク",
@@ -558,14 +587,16 @@ func monthReadings() map[uint64]string {
 	return readings
 }
 
-// counterIndex は助数詞のキーを最長一致で引くための索引です。
+// counterIndex looks up counter keys by longest match.
 var counterIndex = newPrefixIndex(slices.Collect(maps.Keys(counters)))
 
-// matchNumberAt は、tokens[i] から始まる数の並びと、それに続く助数詞をまとめて読みます。
-// 戻り値は読み、読み終えた次のトークン位置、そして数として読んだかどうかです。
+// matchNumberAt reads the run of digits starting at tokens[i] together with the counter
+// that follows it. It returns the reading, the position of the token after what it read,
+// and whether it read a number.
 //
-// 算用数字は辞書が読みを持たないので、助数詞の有無にかかわらず読みます。漢数字は辞書が
-// 単独では正しく読むので、助数詞が続いて音の変化が要るときだけ読みます。
+// The dictionary has no readings for Arabic numerals, so they are read whether or not a
+// counter follows. Kanji numerals on their own are read correctly by the dictionary, so
+// they are read here only when a counter follows and a sound change is needed.
 func (c *Converter) matchNumberAt(input string, tokens []tokenizer.Token, i int, boundaries map[int]struct{}) (string, int, bool) {
 	if !c.numberReading {
 		return "", 0, false
@@ -590,11 +621,12 @@ func (c *Converter) matchNumberAt(input string, tokens []tokenizer.Token, i int,
 	return readWithCounter(number, key, tokens, end, next)
 }
 
-// readWithCounter は数と助数詞 key をまとめて読み、助数詞を読み飛ばした次のトークン位置を返します。
-// end は数の並びの終端バイト位置、next は数を読み終えた次のトークン位置です。
+// readWithCounter reads the number together with the counter key and returns the position
+// of the token after the counter. end is the byte offset where the number ends, next the
+// position of the token after the number.
 func readWithCounter(number numeral, key string, tokens []tokenizer.Token, end, next int) (string, int, bool) {
-	// 助数詞が覆ったトークンをまとめて読み飛ばす。"ヶ月" のように複数トークンに
-	// 割れる助数詞があるため、進めるのはトークン数ではなくバイト位置で判断する。
+	// Skip every token the counter covers. Some counters, such as "ヶ月", split into several
+	// tokens, so how far to advance is decided by byte offset rather than token count.
 	counterEnd := end + len(key)
 	for next < len(tokens) && tokens[next].Position < counterEnd {
 		next++
@@ -606,7 +638,8 @@ func readWithCounter(number numeral, key string, tokens []tokenizer.Token, end, 
 	return counters[key].read(number, following), next, true
 }
 
-// kanjiDigitValues は漢数字の一桁の値、kanjiUnitValues は位取りの漢字の値です。
+// kanjiDigitValues are the values of single kanji digits, kanjiUnitValues those of the
+// place-value kanji.
 var (
 	kanjiDigitValues = map[rune]uint64{
 		'〇': 0, '零': 0, '一': 1, '二': 2, '三': 3, '四': 4,
@@ -618,13 +651,14 @@ var (
 	}
 )
 
-// maxKanjiNumeralRunes は数として解釈する漢数字の並びの長さの上限です。
-// 桁の列（一二三…）として読んだときに uint64 に収まる範囲に抑えます。
+// maxKanjiNumeralRunes caps the length of a run of kanji numerals interpreted as a number,
+// keeping it within what fits in a uint64 when read as a digit sequence (一二三…).
 const maxKanjiNumeralRunes = 18
 
-// scanKanjiNumeral は tokens[i] から続く漢数字の並びを数として読み取ります。
-// 戻り値は数、並びの終端バイト位置、読み終えた次のトークン位置、数として解釈できたかです。
-// 形態素解析器は漢数字を 1 文字ずつのトークンにするため、並びをまとめてから値にします。
+// scanKanjiNumeral reads the run of kanji numerals starting at tokens[i] as a number.
+// It returns the number, the byte offset where the run ends, the position of the token
+// after it, and whether it could be interpreted as a number. The analyser emits kanji
+// numerals one character per token, so the run is gathered before it is evaluated.
 func scanKanjiNumeral(tokens []tokenizer.Token, i int) (number numeral, end, next int, ok bool) {
 	var sb strings.Builder
 	for next = i; next < len(tokens) && isKanjiNumeralToken(tokens[next]); next++ {
@@ -641,11 +675,12 @@ func scanKanjiNumeral(tokens []tokenizer.Token, i int) (number numeral, end, nex
 	return numeral{reading: readInteger(value), value: value, hasValue: true}, end, next, true
 }
 
-// parseKanjiNumeral は漢数字の並びを数値にします。
-// 位取り（二千二十六）と桁の列（二〇二六）の両方を受け付けます。
+// parseKanjiNumeral converts a run of kanji numerals into a number.
+// It accepts both place-value notation (二千二十六) and digit sequences (二〇二六).
 //
-// 万・億・兆で始まる並び（"万円"、"億"）は数ではなく単位語なので数としません。
-// 一桁が続いたあとに位取りが来る並び（"三二十"）は数として読めないので同じく退けます。
+// A run starting with 万, 億 or 兆 ("万円", "億") is a unit word, not a number, so it is
+// not treated as one. A run where a place unit follows consecutive digits ("三二十")
+// cannot be read as a number and is rejected the same way.
 func parseKanjiNumeral(s string) (uint64, bool) {
 	runes := []rune(s)
 	if len(runes) == 0 || len(runes) > maxKanjiNumeralRunes {
@@ -692,7 +727,8 @@ func parseKanjiNumeral(s string) (uint64, bool) {
 	return total + section + digit, true
 }
 
-// isKanjiNumeralToken は、トークンが漢数字と位取りの漢字だけで構成されているかを判定します。
+// isKanjiNumeralToken reports whether a token consists only of kanji digits and
+// place-value kanji.
 func isKanjiNumeralToken(token tokenizer.Token) bool {
 	if token.Surface == "" {
 		return false
@@ -708,14 +744,15 @@ func isKanjiNumeralToken(token tokenizer.Token) bool {
 	return true
 }
 
-// isKanjiUnit は位取りの漢字（十・百・千・万・億・兆）かを判定します。
+// isKanjiUnit reports whether r is a place-value kanji (十, 百, 千, 万, 億, 兆).
 func isKanjiUnit(r rune) bool {
 	_, ok := kanjiUnitValues[r]
 	return ok
 }
 
-// scanDigits は tokens[i] から続く数字の並びを取り出します。
-// 桁区切りのカンマと小数点は、両側が数字のときだけ数の一部として取り込みます。
+// scanDigits extracts the run of digits starting at tokens[i].
+// Thousands separators and decimal points are taken as part of the number only when there
+// are digits on both sides.
 func scanDigits(tokens []tokenizer.Token, i int) (digits string, end, next int) {
 	if !isDigitToken(tokens[i]) {
 		return "", 0, 0
@@ -733,10 +770,10 @@ func scanDigits(tokens []tokenizer.Token, i int) (digits string, end, next int) 
 
 	for next < len(tokens) {
 		switch {
-		// 桁区切りのカンマは、直後がちょうど3桁のときだけ数の一部とみなす。
-		// そうしないと "1,2月" のような並列の読点まで飲み込んでしまう。
-		// 全角数字は形態素解析器が 1 文字ずつのトークンにするため、桁数は
-		// 続く数字トークンをまとめて数える。
+		// A thousands separator counts as part of the number only when exactly 3 digits
+		// follow; otherwise a listing comma as in "1,2月" would be swallowed too.
+		// The analyser emits full-width digits one character per token, so the digits
+		// are counted across all the digit tokens that follow.
 		case isSeparator(tokens[next], ",", "，") && digitRunAfter(tokens, next) == 3:
 			for next++; next < len(tokens) && isDigitToken(tokens[next]); next++ {
 				appendDigits(next)
@@ -756,8 +793,8 @@ func scanDigits(tokens []tokenizer.Token, i int) (digits string, end, next int) 
 	return sb.String(), end, next
 }
 
-// followedByDigits は、tokens[i] の次が数字トークンかを判定します。
-// digitCount が 0 より大きいときは、桁数まで一致することを求めます。
+// followedByDigits reports whether the token after tokens[i] is a digit token.
+// When digitCount is greater than 0, the digit count must match as well.
 func followedByDigits(tokens []tokenizer.Token, i, digitCount int) bool {
 	if i+1 >= len(tokens) || !isDigitToken(tokens[i+1]) {
 		return false
@@ -765,8 +802,9 @@ func followedByDigits(tokens []tokenizer.Token, i, digitCount int) bool {
 	return digitCount == 0 || utf8.RuneCountInString(tokens[i+1].Surface) == digitCount
 }
 
-// digitRunAfter は、tokens[i] の後ろに連続する数字トークンの合計桁数を返します。
-// 半角の "234" は 1 トークン 3 桁、全角の "２３４" は 3 トークン 1 桁ずつで、どちらも 3 です。
+// digitRunAfter returns the total number of digits in the run of digit tokens after
+// tokens[i]. Half-width "234" is one token of 3 digits and full-width "２３４" is 3 tokens of
+// 1 digit each; both give 3.
 func digitRunAfter(tokens []tokenizer.Token, i int) int {
 	digits := 0
 	for j := i + 1; j < len(tokens) && isDigitToken(tokens[j]); j++ {
@@ -775,12 +813,12 @@ func digitRunAfter(tokens []tokenizer.Token, i int) int {
 	return digits
 }
 
-// isSeparator は、トークンが指定した区切り文字のいずれかかを判定します。
+// isSeparator reports whether a token is one of the given separators.
 func isSeparator(token tokenizer.Token, separators ...string) bool {
 	return slices.Contains(separators, token.Surface)
 }
 
-// isDigitToken は、トークンが算用数字だけで構成されているかを判定します。
+// isDigitToken reports whether a token consists only of Arabic digits.
 func isDigitToken(token tokenizer.Token) bool {
 	if token.Surface == "" {
 		return false
@@ -793,15 +831,16 @@ func isDigitToken(token tokenizer.Token) bool {
 	return true
 }
 
-// isDigit は半角・全角どちらの算用数字かを判定します。
+// isDigit reports whether r is an Arabic digit, half-width or full-width.
 func isDigit(r rune) bool {
 	return (r >= '0' && r <= '9') || (r >= '０' && r <= '９')
 }
 
-// fullWidthDigitOffset は Unicode 上の半角・全角算用数字ブロック間の距離です。
+// fullWidthDigitOffset is the distance between the half-width and full-width digit blocks
+// in Unicode.
 const fullWidthDigitOffset = '０' - '0'
 
-// normalizeDigits は全角の算用数字を半角へ揃えます。
+// normalizeDigits converts full-width Arabic digits to half-width.
 func normalizeDigits(s string) string {
 	if !strings.ContainsFunc(s, func(r rune) bool { return r >= '０' && r <= '９' }) {
 		return s

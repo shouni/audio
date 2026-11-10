@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// fuzzSeeds は、壊し甲斐のある構造を持つ WAV のシードです。
+// fuzzSeeds are WAV seeds whose structure is worth breaking.
 func fuzzSeeds() [][]byte {
 	return [][]byte{
 		buildWAV(defaultSpec([]byte{1, 2, 3, 4})),
@@ -17,10 +17,11 @@ func fuzzSeeds() [][]byte {
 	}
 }
 
-// FuzzExtractAudioData は、任意のバイト列を食わせても解析が panic しないことを確認します。
+// FuzzExtractAudioData checks that parsing does not panic on arbitrary bytes.
 //
-// チャンク走査はオフセットとサイズの足し算だらけで、宣言サイズが実体と食い違う入力では
-// 範囲外アクセスに落ちやすい箇所です。エラーで返すのは構いませんが、落ちてはいけません。
+// Chunk scanning is full of offset and size additions, and inputs whose declared sizes
+// disagree with reality easily drive it out of range. Returning an error is fine;
+// crashing is not.
 func FuzzExtractAudioData(f *testing.F) {
 	for _, seed := range fuzzSeeds() {
 		f.Add(seed)
@@ -31,21 +32,22 @@ func FuzzExtractAudioData(f *testing.F) {
 		if err != nil {
 			return
 		}
-		// 成功したなら、切り出した範囲は必ず入力の内側に収まっていること。
+		// On success, the extracted ranges must lie inside the input.
 		if len(parts.formatHeader)+len(parts.audioData) > len(data) {
-			t.Fatalf("切り出したヘッダー(%d)と音声(%d)の合計が入力(%d)を超えています",
+			t.Fatalf("extracted header (%d) plus audio (%d) exceeds the input (%d)",
 				len(parts.formatHeader), len(parts.audioData), len(data))
 		}
 		if info, err := Inspect(data); err != nil {
-			t.Fatalf("extractAudioData は成功したのに Inspect が失敗しました: %v", err)
+			t.Fatalf("extractAudioData succeeded but Inspect failed: %v", err)
 		} else if info.DataSize != len(parts.audioData) {
-			t.Fatalf("Inspect の DataSize = %d, extractAudioData は %d", info.DataSize, len(parts.audioData))
+			t.Fatalf("Inspect DataSize = %d, extractAudioData gave %d", info.DataSize, len(parts.audioData))
 		}
 	})
 }
 
-// FuzzCombineToMatchesCombineWavData は、2 つの結合経路が常に同じ結論に至ることを
-// 確認します。片方だけが受け付ける入力があると、使う API によって結果が変わります。
+// FuzzCombineToMatchesCombineWavData checks that the two combine paths always reach the
+// same conclusion. If one path accepted an input the other rejects, the result would
+// depend on which API the caller used.
 func FuzzCombineToMatchesCombineWavData(f *testing.F) {
 	for _, seed := range fuzzSeeds() {
 		f.Add(seed, seed)
@@ -66,12 +68,12 @@ func FuzzCombineToMatchesCombineWavData(f *testing.F) {
 			return
 		}
 		if !bytes.Equal(got.Bytes(), want) {
-			t.Fatalf("CombineTo の出力(%dバイト)が CombineWavData(%dバイト)と一致しません", got.Len(), len(want))
+			t.Fatalf("CombineTo output (%d bytes) does not match CombineWavData (%d bytes)", got.Len(), len(want))
 		}
 	})
 }
 
-// FuzzCombineToDoesNotPanic は、ストリーミング経路が単独でも落ちないことを確認します。
+// FuzzCombineToDoesNotPanic checks that the streaming path does not crash on its own either.
 func FuzzCombineToDoesNotPanic(f *testing.F) {
 	for _, seed := range fuzzSeeds() {
 		f.Add(seed)

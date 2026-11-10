@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// benchParts は、24kHz モノラル 16bit で 1 秒ぶんの WAV を count 本作ります。
+// benchParts builds count WAVs of one second each at 24kHz mono 16-bit.
 func benchParts(count int) [][]byte {
 	audio := make([]byte, 48000)
 	parts := make([][]byte, count)
@@ -41,12 +41,13 @@ func BenchmarkCombineWavDataWithGap(b *testing.B) {
 	}
 }
 
-// BenchmarkCombineTo は、出力バッファを確保しない経路の割り当て量を測ります。
-// 割り当ては 1 本あたり走査結果と io.CopyN の LimitReader ぶんの定数で、音声の長さには
-// 依存しません。本数を 8 倍にしても B/op がそれ以上に伸びないことを確かめます。
+// BenchmarkCombineTo measures the allocations of the path that allocates no output buffer.
+// Per input the allocations are a constant for the scan result and io.CopyN's LimitReader,
+// independent of the audio's length. It checks that B/op grows no more than 8 times when
+// the number of inputs grows 8 times.
 func BenchmarkCombineTo(b *testing.B) {
 	for _, count := range []int{8, 64} {
-		b.Run(fmt.Sprintf("%d本", count), func(b *testing.B) {
+		b.Run(fmt.Sprintf("%d inputs", count), func(b *testing.B) {
 			parts := benchParts(count)
 			sources := readSeekers(parts...)
 			b.ReportAllocs()
