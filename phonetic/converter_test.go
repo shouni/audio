@@ -81,12 +81,13 @@ func TestConverter_ConvertToReading(t *testing.T) {
 			input: "コンニチハム",
 			want:  "コンニチハム",
 		},
-		// 「掌」の上書きが「掌握」の「握」を巻き込んで欠落させないこと。
-		// 読み上書きは形態素境界で終わる一致だけを採用する。
+		// The override for 「掌」 must not swallow and drop the 「握」 of 「掌握」.
+		// Reading overrides take only matches that end on a morpheme boundary.
 		//
-		// かつては「世界」と「世界観」で確かめていたが、「世界」は辞書がそのまま
-		// セカイと読むため上書きを削除した。実在する上書きで確かめないと、
-		// 境界判定が壊れてもテストが素通りする。
+		// This used to be checked with 「世界」 and 「世界観」, but the dictionary reads
+		// 「世界」 as セカイ on its own, so that override was removed. Unless the check
+		// uses an override that actually exists, the test passes even with broken
+		// boundary handling.
 		{
 			name:  "形態素境界をまたぐ上書きは適用しない",
 			input: "掌握が変わる",
@@ -145,15 +146,17 @@ func TestConverter_ConvertToReading_WithPhraseSpacing(t *testing.T) {
 			input: "夜の\n朝が来る",
 			want:  "ヨルノ\nアサガ クル",
 		},
-		// 読み上書きを先に適用して入力を分断すると、残った「が」が単独で解析されて
-		// 助詞ではなく接続詞と判定され、文節スペースが落ちる。
+		// Applying the overrides first would cut the input so that the remaining 「が」 is
+		// analysed alone, taken as a conjunction rather than a particle, and loses its
+		// phrase space.
 		{
 			name:  "読み上書きに挟まれた助詞の後にもスペース",
 			input: "運命の閃光が瞳を灼く",
 			want:  "サダメノ ヒカリガ ヒトミオ ヤク",
 		},
-		// 上書きが隣り合う場合。「絆と翼を」で確かめていたが、どちらも辞書が正しく
-		// 読むため上書きを削除した。上書きが実在する語でないと連続を確かめられない。
+		// Adjacent overrides. This used to be checked with 「絆と翼を」, but the dictionary
+		// reads both correctly, so those overrides were removed. Adjacency can only be
+		// checked with words that actually have overrides.
 		{
 			name:  "読み上書きが連続しても文節が保たれる",
 			input: "刃と閃光を",
@@ -186,12 +189,12 @@ func TestConverter_ConvertToReading_WithReadingOverrides(t *testing.T) {
 	}
 }
 
-// TestDefaultReadingOverridesJSON_NoDuplicateKeys は、同梱JSONに重複キーがないことを
-// 確認します。JSON の重複キーはエラーにならず後勝ちで上書きされるため、
-// 追記を重ねる運用では気付かないまま片方が死にます。
+// TestDefaultReadingOverridesJSON_NoDuplicateKeys checks that the bundled JSON has no
+// duplicate keys. A duplicate JSON key is not an error; the later one silently wins, so
+// as entries keep being appended one of them dies unnoticed.
 func TestDefaultReadingOverridesJSON_NoDuplicateKeys(t *testing.T) {
 	dec := json.NewDecoder(bytes.NewReader(defaultReadingOverridesJSON))
-	if _, err := dec.Token(); err != nil { // 先頭の '{'
+	if _, err := dec.Token(); err != nil { // the opening '{'
 		t.Fatalf("failed to read JSON: %v", err)
 	}
 
@@ -206,11 +209,11 @@ func TestDefaultReadingOverridesJSON_NoDuplicateKeys(t *testing.T) {
 			t.Fatalf("unexpected JSON token: %v", keyToken)
 		}
 		if seen[key] {
-			t.Errorf("重複キー %q があります。後のエントリが前のエントリを上書きします", key)
+			t.Errorf("duplicate key %q; the later entry overwrites the earlier one", key)
 		}
 		seen[key] = true
 
-		if _, err := dec.Token(); err != nil { // 値を読み飛ばす
+		if _, err := dec.Token(); err != nil { // skip the value
 			t.Fatalf("failed to read JSON value: %v", err)
 		}
 	}
@@ -226,12 +229,13 @@ func TestDefaultReadingOverrides_Validation(t *testing.T) {
 	}
 }
 
-// TestDefaultReadingOverrides_KeepsPlainCompoundsUnoverridden は、辞書が正しく読める
-// 複合語に当て字を当てないことを確認します。
+// TestDefaultReadingOverrides_KeepsPlainCompoundsUnoverridden checks that compounds the
+// dictionary reads correctly get no ateji reading.
 //
-// 「設計図」を「レシピ」と読ませる上書きが入っていたことがあります。当て字は読みではなく
-// 語の置き換えなので、歌詞に「未来の設計図」と書いた利用者の意図した意味が失われます。
-// 当て字を足すなら、その語が当て字表記で流通しているもの（運命→サダメ 等）に限ります。
+// At one point an override made 「設計図」 read 「レシピ」. Ateji is not a reading but a
+// substitution of the word, so the meaning a user intended by writing 「未来の設計図」 in a
+// lyric is lost. Add ateji only for words that circulate with that reading in that
+// spelling (運命→サダメ and the like).
 func TestDefaultReadingOverrides_KeepsPlainCompoundsUnoverridden(t *testing.T) {
 	converter, err := NewConverter()
 	if err != nil {
@@ -244,11 +248,11 @@ func TestDefaultReadingOverrides_KeepsPlainCompoundsUnoverridden(t *testing.T) {
 	}{
 		{input: "設計図", want: "セッケイズ"},
 		{input: "未来の設計図", want: "ミライノセッケイズ"},
-		// 「音響」をアコースティックと読ませる上書きが入っていたことがあります。
-		// アコースティックは「生楽器の」の意味で、音響とは指すものが違います。
-		// 加えて当て字は派生語に漏れます（音響効果→アコースティックコウカ）。
-		// 当て字が許されるのは、その表記でその読みが流通している語（運命→サダメ、
-		// 永遠→トワ）に限ります。
+		// At one point an override made 「音響」 read アコースティック. アコースティック
+		// means "of acoustic instruments", which is not what 音響 refers to. Ateji also
+		// leaks into derived words (音響効果→アコースティックコウカ). Ateji is allowed only
+		// for words that circulate with that reading in that spelling (運命→サダメ,
+		// 永遠→トワ).
 		{input: "音響", want: "オンキョウ"},
 		{input: "音響効果", want: "オンキョウコウカ"},
 	}
@@ -262,11 +266,12 @@ func TestDefaultReadingOverrides_KeepsPlainCompoundsUnoverridden(t *testing.T) {
 	}
 }
 
-// TestDefaultReadingOverrides_FixesMisreadings は、辞書が別語の読みを当ててしまう表記を
-// 上書きで正しく読ませることを確認します。
+// TestDefaultReadingOverrides_FixesMisreadings checks that spellings to which the
+// dictionary assigns another word's reading are read correctly through overrides.
 //
-// 「瞬く」は辞書が「しばたく」を採用するため、歌詞に書くと シバタク と歌われます。連用形は
-// さらに崩れて シバタタイテ になります。活用形は語幹をキーにすると まとめて拾えます。
+// The dictionary takes 「瞬く」 as 「しばたく」, so written in a lyric it is sung シバタク.
+// The continuative form breaks further into シバタタイテ. Keying an inflecting word by its
+// stem catches all its inflected forms at once.
 func TestDefaultReadingOverrides_FixesMisreadings(t *testing.T) {
 	converter, err := NewConverter()
 	if err != nil {
@@ -286,10 +291,12 @@ func TestDefaultReadingOverrides_FixesMisreadings(t *testing.T) {
 		{input: "馬が奔る", want: "ウマガハシル"},
 		{input: "守りを固める", want: "マモリオカタメル"},
 		{input: "種を宿す", want: "タネオヤドス"},
-		// 辞書は「割る」単独でも「ワレル」を返す（自動詞の読みに引きずられる）。
-		// 実測（`music-20260904-180324-15a54300f4a5`）ではそのまま「割れる」と歌われた。
+		// The dictionary returns 「ワレル」 even for 「割る」 alone (dragged by the
+		// intransitive verb's reading). In a real take (`music-20260904-180324-15a54300f4a5`)
+		// it was sung as 「割れる」.
 		{input: "高架の下を割る", want: "コウカノシタオワル"},
-		// 単独の「露」は「ロ」。複合語（朝露・露出）は正しいので、単独形だけを上書きする。
+		// 「露」 alone reads 「ロ」. Compounds (朝露, 露出) are correct, so only the standalone form
+		// is overridden.
 		{input: "搾った露は", want: "シボッタツユワ"},
 		{input: "電球が瞬いている", want: "デンキュウガマタタイテイル"},
 		{input: "水面が揺蕩う", want: "スイメンガタユタウ"},
@@ -305,17 +312,18 @@ func TestDefaultReadingOverrides_FixesMisreadings(t *testing.T) {
 		{input: "一途な性格", want: "イチズナセイカク"},
 		{input: "十六夜の月", want: "イザヨイノツキ"},
 		{input: "掌を返す", want: "テノヒラオカエス"},
-		// 燦めく は 燦|めく に割れて 燦メク (素の辞書) / サンメク (燦→サン 上書き) になる
+		// 燦めく splits into 燦|めく and becomes 燦メク (plain dictionary) / サンメク (with the
+		// 燦→サン override)
 		{input: "燦めく星座", want: "キラメクセイザ"},
 		{input: "夜空に燦めきを", want: "ヨゾラニキラメキオ"},
 		{input: "星が燦めいて", want: "ホシガキラメイテ"},
-		// 誰そ彼 は辞書が ダレソカレ と読む。時が付くと連濁で ドキ になる
+		// The dictionary reads 誰そ彼 as ダレソカレ. With 時 attached, rendaku makes it ドキ
 		{input: "誰そ彼の空", want: "タソガレノソラ"},
 		{input: "誰そ彼時の街", want: "タソガレドキノマチ"},
-		// 仄暗い は 仄|暗い に割れて 仄クライ になる
+		// 仄暗い splits into 仄|暗い and becomes 仄クライ
 		{input: "仄暗い部屋で", want: "ホノグライヘヤデ"},
 		{input: "仄暗く沈む", want: "ホノグラクシズム"},
-		// 檸檬 は辞書に読みがなく漢字のまま残る
+		// The dictionary has no reading for 檸檬, so it stays in kanji
 		{input: "檸檬の香り", want: "レモンノカオリ"},
 	}
 
@@ -328,12 +336,13 @@ func TestDefaultReadingOverrides_FixesMisreadings(t *testing.T) {
 	}
 }
 
-// TestDefaultReadingOverrides_FixesImperatives は、接尾辞や別動詞と同形の命令形が
-// 化けないことを確認します。
+// TestDefaultReadingOverrides_FixesImperatives checks that imperatives spelled like a
+// suffix or another verb are not garbled.
 //
-// 「立て」は単独だと接尾辞の ダテ（二本立て等）として解析され、「打て」は記号の
-// 直後で 打つ（ブツ）側の ブテ に化け、「絶て」は名詞の直後で 絶っ＋て（ゼッテ）に
-// 割れます。命令形は歌詞では行頭・単独で置かれることが多く、この化け方は目立ちます。
+// 「立て」 alone is analysed as the suffix ダテ (as in 二本立て), 「打て」 right after a
+// symbol turns into ブテ from 打つ read ブツ, and 「絶て」 right after a noun splits into
+// 絶っ＋て (ゼッテ). In lyrics imperatives often stand alone or at the start of a line,
+// where these garblings stand out.
 func TestDefaultReadingOverrides_FixesImperatives(t *testing.T) {
 	converter, err := NewConverter()
 	if err != nil {
@@ -349,8 +358,9 @@ func TestDefaultReadingOverrides_FixesImperatives(t *testing.T) {
 		{input: "君よ立て", want: "キミヨタテ"},
 		{input: "[Chorus] 打て", want: "[Chorus] ウテ"},
 		{input: "打て…", want: "ウテ…"},
-		// 絶て の上書きで ゼッテ 化けは直る。直前の「今」が名詞連続の解析に
-		// 引きずられて コン と読まれる問題はラティス由来で、上書きでは直せない。
+		// The 絶て override fixes the ゼッテ garbling. That the preceding 「今」 is read
+		// コン, dragged by the noun-sequence analysis, comes from the lattice and cannot
+		// be fixed by an override.
 		{input: "今絶て", want: "コンタテ"},
 	}
 
@@ -363,11 +373,12 @@ func TestDefaultReadingOverrides_FixesImperatives(t *testing.T) {
 	}
 }
 
-// TestDefaultReadingOverrides_KeepsCompoundsIntact は、訓読み用の上書きが同じ漢字を含む
-// 音読みの熟語を壊さないことを確認します。
+// TestDefaultReadingOverrides_KeepsCompoundsIntact checks that overrides for kun readings
+// do not break on-reading compounds containing the same kanji.
 //
-// 「瞬く」「拘る」「掌」「燈」のような短い上書きは、形態素境界で終わる一致だけを採用する
-// 仕組みに守られています。境界判定が壊れると 一瞬 が イチマタタク のように崩れます。
+// Short overrides such as 「瞬く」「拘る」「掌」「燈」 are protected by taking only matches
+// that end on a morpheme boundary. If the boundary check broke, 一瞬 would collapse into
+// something like イチマタタク.
 func TestDefaultReadingOverrides_KeepsCompoundsIntact(t *testing.T) {
 	converter, err := NewConverter()
 	if err != nil {
@@ -391,7 +402,7 @@ func TestDefaultReadingOverrides_KeepsCompoundsIntact(t *testing.T) {
 		{input: "奔流に飲まれ", want: "ホンリュウニノマレ"},
 		{input: "天空の城", want: "テンクウノシロ"},
 		{input: "お守りを買う", want: "オマモリオカウ"},
-		// 「露」「割る」の上書きが複合語と活用形に及ばないこと。
+		// The 「露」 and 「割る」 overrides must not reach compounds and inflected forms.
 		{input: "露出", want: "ロシュツ"},
 		{input: "朝露", want: "アサツユ"},
 		{input: "夜露に濡れる", want: "ヨツユニヌレル"},
@@ -399,16 +410,18 @@ func TestDefaultReadingOverrides_KeepsCompoundsIntact(t *testing.T) {
 		{input: "割った", want: "ワッタ"},
 		{input: "国境を守り抜く", want: "コッキョウオマモリヌク"},
 		{input: "種を宿した苗", want: "タネオヤドシタナエ"},
-		// 上書きの照合はトークンの開始位置からしか行わない。「非同期」は1トークンなので
-		// 内側の「同期」は照合対象にならず、上書き (同期→シンクロ) が発火しない。
-		// かつては「非同期」専用の上書きでヒドウキにしていたが、辞書がそう読むため
-		// 不要だった。この性質が崩れるとヒシンクロになるので、上書きを削除した側の
-		// 保険としてここで固定する。
+		// Overrides are matched only from the start of a token. 「非同期」 is one token,
+		// so the 「同期」 inside it is never matched and the override (同期→シンクロ) does
+		// not fire. There used to be an override just for 「非同期」 making it ヒドウキ,
+		// but the dictionary already reads it that way, so it was unnecessary. If this
+		// property broke the result would be ヒシンクロ, so it is pinned here as the
+		// safeguard for removing that override.
 		{input: "非同期", want: "ヒドウキ"},
 		{input: "非同期処理", want: "ヒドウキショリ"},
-		// 仄暗い の上書きが、辞書が正しく読める 仄か を巻き込まないこと
+		// The 仄暗い override must not drag in 仄か, which the dictionary reads correctly
 		{input: "仄かな光", want: "ホノカナヒカリ"},
-		// 立て→タテ の上書きが、接尾辞 ダテ の複合語や別読みの熟語を巻き込まないこと
+		// The 立て→タテ override must not drag in compounds with the suffix ダテ or compounds read
+		// differently
 		{input: "二本立て", want: "ニホンダテ"},
 		{input: "献立", want: "コンダテ"},
 		{input: "旅立て", want: "タビダテ"},
@@ -427,19 +440,21 @@ func TestDefaultReadingOverrides_KeepsCompoundsIntact(t *testing.T) {
 	}
 }
 
-// TestDefaultReadingOverrides_NoRedundantEntries は、辞書が既に正しく読める語に
-// 上書きを置いていないことを確認します。
+// TestDefaultReadingOverrides_NoRedundantEntries checks that no override sits on a word
+// the dictionary already reads correctly.
 //
-// 上書きは「辞書と数の規則が間違える語」の一覧であることに価値があります。同じ読みを
-// 書いたエントリは挙動を変えないまま増え続け、本当に危ない語を見分けられなくします。
-// 実際、一度は 120 件中 51 件が辞書と同一でした。
+// The overrides are valuable as a list of the words the dictionary and the number rules
+// get wrong. Entries restating the same reading keep piling up without changing behaviour
+// and make the genuinely dangerous words harder to spot. In fact, at one point 51 of 120
+// entries matched the dictionary.
 //
-// 比較の基準には数の規則（WithNumberReading）も含めます。「一本」のように数の規則で
-// 読める語は上書きに置かず、規則が読み違える語（「一日」→ イチニチ）だけを置くためです。
+// The baseline includes the number rules (WithNumberReading), so that words the rules
+// read correctly, such as 「一本」, stay out of the overrides and only words the rules
+// misread (「一日」 → イチニチ) go in.
 //
-// 単語単体だけでなく複数の文脈で比較します。「何時」のように、単体では辞書も
-// イツと読むが文中ではナンジになる語があり、単体比較だけでは必要な上書きまで
-// 不要と判定してしまうためです。
+// The comparison runs in several contexts, not only on the bare word. Some words, such as
+// 「何時」, are read イツ by the dictionary alone but ナンジ mid-sentence, and a bare
+// comparison would judge even a needed override redundant.
 func TestDefaultReadingOverrides_NoRedundantEntries(t *testing.T) {
 	tok, err := tokenizer.New(ipa.Dict(), tokenizer.OmitBosEos())
 	if err != nil {
@@ -453,12 +468,13 @@ func TestDefaultReadingOverrides_NoRedundantEntries(t *testing.T) {
 		t.Fatalf("failed to create converter: %v", err)
 	}
 
-	// "[Chorus] %s" は同一行に英語タグがある文脈。記号・未知語の直後は
-	// ラティスの経路が変わり、単独では正しく読める語が割れることがある
-	// （重なる → 重/なる でオモナル）。行頭の改行文脈は行分割で吸収されるため、
-	// ここで確かめるのは同一行の記号直後だけでよい。
-	// "今%s" は名詞が直前に来る文脈。命令形が接尾辞として解釈される誤読
-	// （今絶て → コンゼッテ）はこの形でだけ現れる。
+	// "[Chorus] %s" is the context of an English tag on the same line. Right after a
+	// symbol or unknown word the lattice path changes, and a word read correctly on its own
+	// can split (重なる → 重/なる, read オモナル). The line-initial context after a newline
+	// is absorbed by splitting into lines, so only the same-line position after a symbol
+	// needs checking here.
+	// "今%s" is the context of a preceding noun. The misreading of an imperative as a
+	// suffix (今絶て → コンゼッテ) appears only in this form.
 	contexts := []string{
 		"%s", "%sが好き", "%sを抱いて", "%sの向こう", "君の%s",
 		"遠い%sへ", "%sだけが残る", "静かな%sと", "%sは終わらない",
@@ -470,21 +486,22 @@ func TestDefaultReadingOverrides_NoRedundantEntries(t *testing.T) {
 			for _, format := range contexts {
 				input := strings.ReplaceAll(format, "%s", surface)
 				if plain.ConvertToReading(input) != overridden.ConvertToReading(input) {
-					return // どれか1つでも辞書と違えば、この上書きは仕事をしている。
+					return // If any one differs from the dictionary, this override is doing its job.
 				}
 			}
-			t.Errorf("上書き %q (%q) は全文脈で辞書の読みと一致します。辞書が正しく読めるので削除してください",
+			t.Errorf("override %q (%q) matches the dictionary reading in every context; the dictionary reads it correctly, so remove it",
 				surface, defaultReadingOverrides[surface])
 		})
 	}
 }
 
-// TestConverter_ConvertToReading_LineInitialWords は、改行や英語タグの直後でも
-// 行頭の語の読みが変わらないことを確認します。
+// TestConverter_ConvertToReading_LineInitialWords checks that the reading of a
+// line-initial word does not change after a newline or an English tag.
 //
-// 改行を跨いで一括解析すると、行頭の語が直前の記号・未知語の文脈に引きずられて
-// 分割が変わります（「重なる」が 重/なる に割れてオモナルになる）。入力を行ごとに
-// 解析することで防いでいます。同一行に記号がある場合は読み上書きで補正します。
+// Analysing across newlines lets a line-initial word be dragged by the context of the
+// preceding symbols or unknown words and split differently (「重なる」 splits into 重/なる,
+// read オモナル). Analysing the input line by line prevents this. When a symbol is on the
+// same line, a reading override corrects it.
 func TestConverter_ConvertToReading_LineInitialWords(t *testing.T) {
 	converter, err := NewConverter()
 	if err != nil {
@@ -550,9 +567,9 @@ func TestHiraganaToKatakana(t *testing.T) {
 	}
 }
 
-// TestConverter_ConvertToReading_NormalizesUnknownHiragana は、辞書に読みがない語の
-// 表層形フォールバックがひらがなのまま出力されないことを確認します。
-// 出力の契約はカタカナなので、未知語のひらがなはカタカナへ正規化されます。
+// TestConverter_ConvertToReading_NormalizesUnknownHiragana checks that the surface-form
+// fallback for words the dictionary cannot read is not output as hiragana.
+// The output contract is katakana, so hiragana in unknown words is normalized to katakana.
 func TestConverter_ConvertToReading_NormalizesUnknownHiragana(t *testing.T) {
 	converter, err := NewConverter()
 	if err != nil {
@@ -563,15 +580,17 @@ func TestConverter_ConvertToReading_NormalizesUnknownHiragana(t *testing.T) {
 		t.Run(input, func(t *testing.T) {
 			got := converter.ConvertToReading(input)
 			if strings.ContainsFunc(got, isConvertibleHiragana) {
-				t.Errorf("ConvertToReading(%q) = %q にひらがなが残っています", input, got)
+				t.Errorf("ConvertToReading(%q) = %q, which still contains hiragana", input, got)
 			}
 		})
 	}
 }
 
-// 呼び出し側が読みを決めた語はカタカナで渡す、という契約を固定します（楽曲生成サービスはふりがなを
-// カタカナにしてから渡す）。ひらがなで渡すと「へ」「を」が助詞として切り出されて読みが崩れ、
-// 後ろの語の読みまで変わるため、カタカナの語は読みも前後の語も変えないことを確かめます。
+// Pins the contract that words whose reading the caller has decided are passed in katakana
+// (the music generation service writes furigana in katakana before passing it on). Passed
+// in hiragana, 「へ」 and 「を」 are split off as particles, which breaks the reading and
+// changes the following word's reading too, so this checks that a katakana word changes
+// neither its own reading nor the words around it.
 func TestConverter_ConvertToReading_KeepsKatakanaReadings(t *testing.T) {
 	converter, err := NewConverter()
 	if err != nil {
@@ -609,13 +628,13 @@ func TestConverter_WithoutDefaultReadingOverrides(t *testing.T) {
 
 	const input = "こんにちは"
 	if got := withDefaults.ConvertToReading(input); got != "コンニチワ" {
-		t.Errorf("標準上書きあり = %q, want コンニチワ", got)
+		t.Errorf("with default overrides = %q, want コンニチワ", got)
 	}
 	if got := without.ConvertToReading(input); got != "コンニチハ" {
-		t.Errorf("標準上書きなし = %q, want コンニチハ (辞書読みのまま)", got)
+		t.Errorf("without default overrides = %q, want コンニチハ (the dictionary reading)", got)
 	}
 
-	// 標準を外した上で独自の上書きだけを載せられること（Option は指定順に適用）
+	// Custom overrides alone can be loaded once the defaults are dropped (options apply in order)
 	custom, err := NewConverter(
 		WithoutDefaultReadingOverrides(),
 		WithReadingOverrides(map[string]string{"こんにちは": "チーッス"}),
@@ -624,7 +643,7 @@ func TestConverter_WithoutDefaultReadingOverrides(t *testing.T) {
 		t.Fatalf("failed to create converter: %v", err)
 	}
 	if got := custom.ConvertToReading(input); got != "チーッス" {
-		t.Errorf("独自上書き = %q, want チーッス", got)
+		t.Errorf("custom override = %q, want チーッス", got)
 	}
 }
 
@@ -653,7 +672,7 @@ func TestLoadReadingOverridesJSON_RejectsEmptyValues(t *testing.T) {
 }
 
 func BenchmarkConverter_ConvertToReading(b *testing.B) {
-	// ベンチマーク実行前の初期化時におけるエラーハンドリング
+	// Error handling for the setup before the benchmark runs
 	converter, err := NewConverter()
 	if err != nil {
 		b.Fatalf("failed to create converter: %v", err)
@@ -666,11 +685,12 @@ func BenchmarkConverter_ConvertToReading(b *testing.B) {
 	}
 }
 
-// TestConverter_ConvertToReading_PreservesLineTerminators は、改行文字が入力のまま
-// 引き継がれ、CRLF の \r が読みに混ざらないことを確認します。
+// TestConverter_ConvertToReading_PreservesLineTerminators checks that line terminators are
+// carried over as in the input and that the \r of a CRLF does not leak into the reading.
 //
-// \r を行の一部として解析すると未知語として読みへ漏れ、文節スペースの末尾トリムも
-// \r に阻まれて「ソラガ \r\n」のように空白が残ります。
+// Analysing \r as part of the line leaks it into the reading as an unknown word, and the
+// \r also blocks the trailing trim of phrase spacing, leaving a space as in
+// 「ソラガ \r\n」.
 func TestConverter_ConvertToReading_PreservesLineTerminators(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -750,8 +770,9 @@ func TestConverter_WithReadingOverridesJSON(t *testing.T) {
 		}
 	})
 
-	// Option は値を返せないため、エラーは NewConverter が返す。ここで黙って無視すると
-	// 辞書の読み込み失敗に気付かないまま、上書きの効かない Converter が出来上がる。
+	// An Option cannot return a value, so NewConverter returns the error. Silently ignoring
+	// it would produce a Converter whose overrides do not work, without anyone noticing the
+	// dictionary failed to load.
 	t.Run("壊れたJSONはNewConverterがエラーにすること", func(t *testing.T) {
 		tests := []struct {
 			name string

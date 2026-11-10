@@ -5,18 +5,18 @@ import (
 	"math"
 )
 
-// factSampleCountSize は fact チャンクのサンプル数フィールドのサイズ（バイト）です。
+// factSampleCountSize is the size in bytes of the sample count field of a fact chunk.
 const factSampleCountSize = 4
 
-// buildCombinedHeader は結合後の WAV ヘッダーを組み立てます。
+// buildCombinedHeader assembles the header of the combined WAV.
 //
-// formatHeader は先頭ファイルの data チャンク直前までのバイト列です。RIFF チャンクサイズを
-// 結合後の値へ書き換え、fact チャンクがあればそのサンプル数も書き換えて、末尾に結合後の
-// data チャンクヘッダーを付け足します。fmt チャンクや LIST などの付随チャンクは
-// 先頭ファイルのものがそのまま残ります。
+// formatHeader is the first file's bytes up to just before its data chunk. It rewrites the
+// RIFF chunk size to the combined value, rewrites the sample count of a fact chunk if
+// there is one, and appends the combined data chunk header. The fmt chunk and other
+// accompanying chunks such as LIST stay as the first file had them.
 func buildCombinedHeader(formatHeader []byte, format Format, totalAudioSize uint64) ([]byte, error) {
 	headerSize := uint64(len(formatHeader)) + chunkHeaderSize
-	// RIFFチャンクサイズ = (全ヘッダー + 全データ) - 8
+	// RIFF chunk size = (all headers + all data) - 8
 	riffChunkSize := headerSize + totalAudioSize - chunkHeaderSize
 	if riffChunkSize > math.MaxUint32 {
 		return nil, &ErrWAVTooLarge{Size: riffChunkSize}
@@ -31,17 +31,18 @@ func buildCombinedHeader(formatHeader []byte, format Format, totalAudioSize uint
 	return header, nil
 }
 
-// updateFactChunk は引き継いだヘッダーに fact チャンクがあれば、そのサンプル数を
-// 結合後の値へ書き換えます。
+// updateFactChunk rewrites the sample count of a fact chunk in the carried header, if
+// there is one, to the combined value.
 //
-// fact チャンクは data チャンクとは別にチャンネルあたりのサンプル数を持つため、
-// 先頭ファイルの値のまま引き継ぐと、結合後も 1 本目の長さを指し続けます。
-// サンプル数は Duration や WithGap と同じく、ブロックアライン 1 つを 1 サンプルとして
-// 求めます。ブロックアラインが 0 になるフォーマットでは求められないので手を付けません。
+// A fact chunk holds the per-channel sample count separately from the data chunk, so
+// carried over with the first file's value it would keep describing the length of the
+// first file after combining. Like Duration and WithGap, the count treats one block align
+// as one sample. A format whose block align is 0 has no count to compute, so the chunk is
+// left alone.
 //
-// header は data チャンク直前までなので、走査が data に届くことはありません。
-// サンプル数がバイト数を超えることはなく、呼び出し元で 4GB 超過を弾いた後なので
-// uint32 に収まります。
+// header ends just before the data chunk, so the scan never reaches data. The sample
+// count never exceeds the byte count, and the caller has already rejected anything over
+// 4GB, so it fits in a uint32.
 func updateFactChunk(header []byte, format Format, totalAudioSize uint64) {
 	blockAlign := uint64(format.blockAlign())
 	if blockAlign == 0 {
@@ -68,14 +69,14 @@ func updateFactChunk(header []byte, format Format, totalAudioSize uint64) {
 	}
 }
 
-// buildCombinedWav はオーディオパーツのスライスを一括でコピーして WAV ファイルを再構築します。
-// 出力バッファの確保は一度だけで、以降はその中へ直接書き込みます。
+// buildCombinedWav rebuilds a WAV file by copying a slice of audio parts in one pass.
+// The output buffer is allocated once and everything is written straight into it.
 func buildCombinedWav(first wavParts, audioParts [][]byte, totalAudioSize uint64) ([]byte, error) {
 	header, err := buildCombinedHeader(first.formatHeader, first.format, totalAudioSize)
 	if err != nil {
 		return nil, err
 	}
-	// 32bit 環境では 2GB を超えた時点で int に収まらない。make に渡す前に弾く。
+	// On 32-bit platforms anything over 2GB does not fit in an int. Reject it before make.
 	if totalAudioSize > uint64(math.MaxInt)-uint64(len(header)) {
 		return nil, &ErrWAVTooLarge{Size: totalAudioSize + uint64(len(header)) - chunkHeaderSize}
 	}

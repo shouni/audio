@@ -76,4 +76,11 @@ Entries whose reading matches what the dictionary already produces change no beh
 - `wav` tests build their fixtures programmatically (`buildWAV`, `defaultSpec`, `insertChunkBeforeData` in `wav/header_test.go`); there are no binary test fixtures in the repo. Keep it that way — a malformed-input case should be constructed in code where the malformation is visible.
 - Three fuzz targets in `wav/fuzz_test.go` run in CI, as above. New parsing code belongs behind them rather than behind a hand-listed set of bad inputs.
 - `wav/bench_test.go` measures both combine paths with `b.ReportAllocs()` / `b.SetBytes`; the allocation count is the point of the memory-efficiency claims, so check it before changing the buffer strategy.
-- Doc comments and test names are Japanese, in the `名前 は …します。` form; error strings are Japanese.
+- Test function names are English. Subtest names (`t.Run` names and table `name` fields) are still Japanese; they are labels, not messages, and may be moved to English later.
+
+## Conventions
+
+- **Comments, doc comments, error / log / panic messages and test assertion messages are English** (moved from Japanese on 2026-11-10; do not mix Japanese back in). Doc comments follow pkg.go.dev style (`Name does …`); error strings follow Go style (lowercase, no trailing punctuation, ST1005).
+- **Japanese stays only as data**: the reading dictionaries (`reading_overrides.json`, the counter and numeral tables), kana/kanji mappings, Japanese input/expected-output pairs in tests and examples, part-of-speech strings compared at runtime (`助詞`, `助動詞`), and Japanese examples quoted inline in an English comment to illustrate a linguistic point (「三本」 reads サンボン).
+- **`README.md` is English and `README.ja.md` is its Japanese version.** Change them together.
+- `ErrMismatchedWAVFormat.Field` holds an English field name (`"sample rate"`, `"channel count"`, …); it is part of the error message, not data.

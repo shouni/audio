@@ -34,20 +34,23 @@ func TestConverter_WithNumberReading(t *testing.T) {
 		{"接頭辞と組み合わせ", "第3回", "ダイサンカイ"},
 		{"位取りの漢字", "1兆と3億と1万", "イッチョウトサンオクトイチマン"},
 		{"人の特殊読み", "1人と2人と4人", "ヒトリトフタリトヨニン"},
-		// 四人ヨニンの「ヨ」は一の位で決まるので、十四人もジュウヨニンになる。
+		// The 「ヨ」 of 四人ヨニン depends on the ones digit, so 十四人 is ジュウヨニン too.
 		{"一の位で決まる読み", "14人と24人と11人", "ジュウヨニントニジュウヨニントジュウイチニン"},
 		{"時刻の一の位", "4時と17時と19時と24時", "ヨジトジュウシチジトジュウクジトニジュウヨジ"},
 		{"年と円の一の位", "14年で14円", "ジュウヨネンデジュウヨエン"},
-		// 「1日」は単独や日付の並びでは ツイタチ だが、期間を表す語や数が続けば イチニチ。
+		// 「1日」 alone or in a date is ツイタチ, but イチニチ when a duration word or a number
+		// follows.
 		{"1日は日付", "8月1日と毎月1日、1日から3日まで", "ハチガツツイタチトマイツキツイタチ、ツイタチカラミッカマデ"},
 		{"1日は期間", "1日中に1日3回、1日目と1日おきと1日あたり", "イチニチチュウニイチニチサンカイ、イチニチメトイチニチオキトイチニチアタリ"},
 		{"1日半と1日後", "1日半と1日後", "イチニチハントイチニチゴ"},
-		// 「日間」「分間」は形態素解析器が 1 トークンにするので、「日」「分」とは別の項目で読む。
+		// The analyser emits 「日間」 and 「分間」 as one token, so they are read by entries
+		// separate from 「日」 and 「分」.
 		{"日間", "1日間と2日間と3日間と14日間", "イチニチカントフツカカントミッカカントジュウヨッカカン"},
 		{"分間", "1分間と3分間と10分間と十分間", "イップンカントサンプンカントジュップンカントジュップンカン"},
 		{"時と時間の一の位", "0時と9時間", "レイジトクジカン"},
 		{"サ行・タ行の促音便", "1体と1社と1章と1種類と3種類", "イッタイトイッシャトイッショウトイッシュルイトサンシュルイ"},
-		// 全角数字は 1 文字ずつのトークンになるため、桁区切りの直後の桁数はまとめて数える。
+		// Full-width digits become one token per character, so the digits after a thousands
+		// separator are counted together.
 		{"全角の桁区切り", "２，０００円と１，２３４，５６７円", "ニセンエントヒャクニジュウサンマンヨンセンゴヒャクロクジュウナナエン"},
 		{"全角の桁区切りでない読点", "１，２月と１，２３４５", "イチ，ニガツトイチ，ニセンサンビャクヨンジュウゴ"},
 		{"全角の小数", "３．５秒", "サンテンゴビョウ"},
@@ -56,10 +59,11 @@ func TestConverter_WithNumberReading(t *testing.T) {
 		{"歳の特殊読み", "20歳", "ハタチ"},
 		{"月の特殊読み", "4月と7月と9月", "シガツトシチガツトクガツ"},
 		{"ヶ月", "3ヶ月と1ヶ月", "サンカゲツトイッカゲツ"},
-		// 先頭の 0 は数量ではなく識別子のことが多いので、桁として読まない。
+		// A leading 0 usually marks an identifier rather than a quantity, so it is not read by
+		// place value.
 		{"先頭がゼロ", "007", "ゼロゼロナナ"},
 		{"電話番号のような並び", "0120", "ゼロイチニゼロ"},
-		// uint64 に収まらない桁数も 1 文字ずつ読む。
+		// Digit counts that do not fit in a uint64 are read one character at a time too.
 		{"桁あふれ", "12345678901234567890123", "イチニサンヨンゴロクナナハチキュウゼロイチニサンヨンゴロクナナハチキュウゼロイチニサン"},
 	}
 
@@ -72,9 +76,9 @@ func TestConverter_WithNumberReading(t *testing.T) {
 	}
 }
 
-// TestConverter_NumberReadingIsOptIn は、Option を付けなければ既存の挙動が変わらない
-// ことを確認します。数字の読みは既定の解釈にすぎず、勝手に変えると呼び出し側の
-// 期待していた出力が黙って書き換わります。
+// TestConverter_NumberReadingIsOptIn checks that existing behaviour does not change
+// without the Option. A number's reading is only the default interpretation, and changing
+// it unasked would silently rewrite the output callers expected.
 func TestConverter_NumberReadingIsOptIn(t *testing.T) {
 	converter, err := NewConverter()
 	if err != nil {
@@ -91,11 +95,13 @@ func TestConverter_NumberReadingIsOptIn(t *testing.T) {
 	}
 }
 
-// TestKanjiNumerals は、漢数字に助数詞が続くときだけ数の規則で読むことを確認します。
+// TestKanjiNumerals checks that kanji numerals are read by the number rules only when a
+// counter follows.
 //
-// 辞書は漢数字そのものは読めますが（三 → サン）、助数詞との境目の音の変化を持たないため
-// "三本" が サンホン になります。かつては「一本」「二人」などを読み上書きで個別に直して
-// いましたが、数が変わるたびに外れる（三本・十本は誰も直していない）ので規則に寄せました。
+// The dictionary can read a kanji numeral itself (三 → サン) but not the sound change at
+// the counter, so "三本" comes out サンホン. 「一本」, 「二人」 and the like used to be fixed
+// one by one with reading overrides, but that broke every time the number changed (nobody
+// had fixed 三本 or 十本), so it moved to the rules.
 func TestKanjiNumerals(t *testing.T) {
 	converter, err := NewConverter(WithNumberReading())
 	if err != nil {
@@ -151,9 +157,10 @@ func TestKanjiNumerals(t *testing.T) {
 			},
 		},
 		{
-			// "一日" は規則だと ツイタチ になるが、歌詞や文中ではほぼ イチニチ（一日中、一日の終わり）。
-			// 上書きが規則より先に効くので、こちらは読み上書きで守る。算用数字の単独の "1日" は
-			// 日付なので ツイタチ のまま（期間を表す語が続く場合は readFirstDayAsDuration が見る）。
+			// By the rules "一日" would be ツイタチ, but in lyrics and prose it is almost always
+			// イチニチ (一日中, 一日の終わり). Overrides take effect before the rules, so a reading
+			// override protects it. The Arabic "1日" on its own is a date and stays ツイタチ
+			// (readFirstDayAsDuration handles a following duration word).
 			name: "一日は上書きでイチニチ",
 			want: map[string]string{
 				"一日中": "イチニチチュウ", "一日の終わり": "イチニチノオワリ", "1日": "ツイタチ",
@@ -208,9 +215,9 @@ func TestParseKanjiNumeral(t *testing.T) {
 	}
 }
 
-// TestCounterSoundChanges は、数と助数詞の境目に起きる促音便・連濁・半濁音化を
-// 助数詞の分類ごとに確認します。分類を取り違えると三本がサンホン、三発がサンバツに
-// なるなど、日本語として成立しない読みが出ます。
+// TestCounterSoundChanges checks the gemination, rendaku voicing and handakuten at the join
+// of number and counter, per counter class. Getting a class wrong produces readings that
+// are not Japanese, such as サンホン for 三本 or サンバツ for 三発.
 func TestCounterSoundChanges(t *testing.T) {
 	converter, err := NewConverter(WithNumberReading())
 	if err != nil {
@@ -304,9 +311,9 @@ func TestCounterSoundChanges(t *testing.T) {
 	}
 }
 
-// TestNumberReadingRespectsTokenBoundaries は、助数詞に見える文字がその位置で
-// 助数詞として使われていないときに手を出さないことを確認します。形態素境界で
-// 終わる一致だけを採るので、"3人称" の "人" は助数詞になりません。
+// TestNumberReadingRespectsTokenBoundaries checks that a character that looks like a
+// counter is left alone when it is not used as a counter in that position. Only matches
+// ending on a morpheme boundary are taken, so the "人" of "3人称" is not a counter.
 func TestNumberReadingRespectsTokenBoundaries(t *testing.T) {
 	converter, err := NewConverter(WithNumberReading())
 	if err != nil {
@@ -321,7 +328,8 @@ func TestNumberReadingRespectsTokenBoundaries(t *testing.T) {
 		{"一人称", "イチニンショウ"},
 		{"兆し", "キザシ"},
 		{"万感の思い", "バンカンノオモイ"},
-		// 辞書が 1 語で持つ漢数字入りの語は分割されないので触らない。
+		// Words with kanji numerals that the dictionary holds as one word are not split, so they
+		// are left alone.
 		{"十二月", "ジュウニガツ"},
 	}
 
@@ -334,8 +342,8 @@ func TestNumberReadingRespectsTokenBoundaries(t *testing.T) {
 	}
 }
 
-// TestNumberReadingCombinesWithOtherOptions は、数の読みが読み上書きや文節スペースと
-// 併用できることを確認します。
+// TestNumberReadingCombinesWithOtherOptions checks that number reading works together with
+// reading overrides and phrase spacing.
 func TestNumberReadingCombinesWithOtherOptions(t *testing.T) {
 	t.Run("文節スペースと併用", func(t *testing.T) {
 		converter, err := NewConverter(WithNumberReading(), WithPhraseSpacing())
@@ -347,7 +355,7 @@ func TestNumberReadingCombinesWithOtherOptions(t *testing.T) {
 		}
 	})
 
-	// 利用者が明示した読みは、数の既定の解釈より優先される。
+	// A reading the user stated takes precedence over the default interpretation of a number.
 	t.Run("読み上書きが数より優先される", func(t *testing.T) {
 		converter, err := NewConverter(
 			WithNumberReading(),
@@ -381,14 +389,14 @@ func TestReadInteger(t *testing.T) {
 		{1234, "センニヒャクサンジュウヨン"},
 		{10000, "イチマン"},
 		{12345, "イチマンニセンサンビャクヨンジュウゴ"},
-		// 千の位は万・億が続くと イッセン になる。
+		// The thousands digit becomes イッセン when 万 or 億 follows.
 		{10000000, "イッセンマン"},
 		{100000000, "イチオク"},
-		// 位取りの単位にも促音便が起きる。
+		// Place units geminate too.
 		{1000000000000, "イッチョウ"},
 		{10000000000000, "ジュッチョウ"},
 		{10000000000000000, "イッケイ"},
-		// 途中の桁グループが 0 なら読み飛ばす。
+		// A digit group of 0 in the middle is skipped.
 		{100000001, "イチオクイチ"},
 	}
 
@@ -401,8 +409,8 @@ func TestReadInteger(t *testing.T) {
 	}
 }
 
-// TestCountersHaveKatakanaReadings は、助数詞表の読みがすべてカタカナであることを
-// 確認します。ひらがなや漢字が混ざると、出力の契約（カタカナ）が崩れます。
+// TestCountersHaveKatakanaReadings checks that every reading in the counter table is
+// katakana. Mixed-in hiragana or kanji would break the output contract (katakana).
 func TestCountersHaveKatakanaReadings(t *testing.T) {
 	isKatakana := func(s string) bool {
 		for _, r := range s {
@@ -415,23 +423,23 @@ func TestCountersHaveKatakanaReadings(t *testing.T) {
 
 	for surface, counter := range counters {
 		if !isKatakana(counter.reading) {
-			t.Errorf("助数詞 %q の読み %q がカタカナではありません", surface, counter.reading)
+			t.Errorf("counter %q has reading %q, which is not katakana", surface, counter.reading)
 		}
 		for value, reading := range counter.irregular {
 			if !isKatakana(reading) {
-				t.Errorf("助数詞 %q の %d に対する読み %q がカタカナではありません", surface, value, reading)
+				t.Errorf("counter %q for %d has reading %q, which is not katakana", surface, value, reading)
 			}
 		}
 	}
 }
 
-// TestCounterIndexIsLongestFirst は、助数詞の索引が長い順に並んでいることを確認します。
-// 短い順だと "ヶ月" より先に "月" が一致し、"3ヶ月" がサンヶガツになります。
+// TestCounterIndexIsLongestFirst checks that the counter index is ordered longest first.
+// Shortest first, "月" would match before "ヶ月" and "3ヶ月" would become サンヶガツ.
 func TestCounterIndexIsLongestFirst(t *testing.T) {
 	for first, keys := range counterIndex {
 		for i := 1; i < len(keys); i++ {
 			if len(keys[i-1]) < len(keys[i]) {
-				t.Errorf("先頭 %q のキーが長さ順ではありません: %v", string(first), keys)
+				t.Errorf("keys starting with %q are not ordered by length: %v", string(first), keys)
 				break
 			}
 		}
@@ -451,19 +459,20 @@ func BenchmarkConverter_ConvertToReading_WithNumberReading(b *testing.B) {
 	}
 }
 
-// TestCounters_NoRedundantEntries は、辞書の読みをなぞるだけの助数詞が表に残って
-// いないことを確認します。
+// TestCounters_NoRedundantEntries checks that no counter in the table merely restates the
+// dictionary's reading.
 //
-// 音の変化も特殊読みもない助数詞は、表に載せなくても辞書の読みで正しく読めます。
-// 載せても挙動は変わらないうえ、本当に補正が要る助数詞を見分けにくくします。
-// 読み上書き辞書に対する TestDefaultReadingOverrides_NoRedundantEntries と同じ考え方です。
+// A counter with neither a sound change nor an irregular reading is read correctly by the
+// dictionary without a table entry. Listing it changes no behaviour and makes the counters
+// that genuinely need correcting harder to spot. It is the same idea as
+// TestDefaultReadingOverrides_NoRedundantEntries for the reading override dictionary.
 func TestCounters_NoRedundantEntries(t *testing.T) {
 	tok, err := tokenizer.New(ipa.Dict(), tokenizer.OmitBosEos())
 	if err != nil {
 		t.Fatalf("failed to create tokenizer: %v", err)
 	}
 
-	// 促音便・連濁・特殊読みが起きうる代表的な数を通す。
+	// Run the representative numbers that can trigger gemination, voicing or irregular readings.
 	values := []uint64{1, 2, 3, 4, 6, 7, 8, 9, 10, 14, 20, 24, 100, 1000}
 
 	for surface, counter := range counters {
@@ -472,16 +481,16 @@ func TestCounters_NoRedundantEntries(t *testing.T) {
 			for _, value := range values {
 				number := readNumeral(strconv.FormatUint(value, 10))
 				if counter.read(number, nil) != number.reading+dictionary {
-					return // どれか1つでも辞書と違えば、この項目は仕事をしている。
+					return // If any one differs from the dictionary, this entry is doing its job.
 				}
 			}
-			t.Errorf("助数詞 %q (%q) は全ての数で辞書の読み (%q) と一致します。辞書が正しく読めるので削除してください",
+			t.Errorf("counter %q (%q) matches the dictionary reading (%q) for every number; the dictionary reads it correctly, so remove it",
 				surface, counter.reading, dictionary)
 		})
 	}
 }
 
-// dictionaryReadingOf は、表層形を単独で解析したときの読みを返します。
+// dictionaryReadingOf returns the reading of a surface form analysed on its own.
 func dictionaryReadingOf(tok *tokenizer.Tokenizer, surface string) string {
 	var sb strings.Builder
 	for _, token := range tok.Tokenize(surface) {

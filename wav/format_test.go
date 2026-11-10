@@ -6,8 +6,9 @@ import (
 	"testing"
 )
 
-// KSDATAFORMAT_SUBTYPE_* は WAVE_FORMAT_EXTENSIBLE のサブフォーマット GUID です。
-// 先頭 2 バイトが実際の符号化方式で、残りは全ての標準サブタイプで共通の固定値です。
+// KSDATAFORMAT_SUBTYPE_* are the WAVE_FORMAT_EXTENSIBLE sub-format GUIDs.
+// The first 2 bytes are the actual encoding; the rest is a fixed value shared by every
+// standard subtype.
 var (
 	subFormatPCM   = subFormatGUID(pcmFormatTag)
 	subFormatFloat = subFormatGUID(floatFormatTag)
@@ -20,15 +21,15 @@ func subFormatGUID(tag uint16) [16]byte {
 	return guid
 }
 
-// extensibleSpec は WAVE_FORMAT_EXTENSIBLE のテスト用 WAV を組み立てるための値です。
+// extensibleSpec holds the values for assembling a WAVE_FORMAT_EXTENSIBLE test WAV.
 type extensibleSpec struct {
 	numChannels   uint16
 	sampleRate    uint32
 	bitsPerSample uint16
-	validBits     uint16 // 0 のときは bitsPerSample
+	validBits     uint16 // bitsPerSample when 0
 	channelMask   uint32
 	subFormat     [16]byte
-	fmtChunkSize  uint32 // 0 のときは extensibleFormatChunkSize
+	fmtChunkSize  uint32 // extensibleFormatChunkSize when 0
 	audio         []byte
 }
 
@@ -43,7 +44,7 @@ func defaultExtensibleSpec(audio []byte) extensibleSpec {
 	}
 }
 
-// buildExtensibleWAV は 40 バイトの fmt チャンクを持つ拡張形式の WAV を組み立てます。
+// buildExtensibleWAV assembles an extensible-format WAV with a 40-byte fmt chunk.
 func buildExtensibleWAV(spec extensibleSpec) []byte {
 	blockAlign := spec.numChannels * spec.bitsPerSample / 8
 
@@ -102,13 +103,14 @@ func TestInspectReadsExtensibleFormat(t *testing.T) {
 	}
 }
 
-// TestCombineWavDataRejectsMismatchedSubFormat は、拡張形式どうしでサブフォーマットが
-// 違う WAV を結合しないことを確認します。
+// TestCombineWavDataRejectsMismatchedSubFormat checks that extensible-format WAVs with
+// different sub-formats are not combined.
 //
-// 拡張形式では AudioFormat が常に 0xFFFE なので、GUID を見ないとリニア PCM と
-// IEEE float が「どちらも 0xFFFE」として一致扱いになり、無音やノイズになります。
+// In the extensible format AudioFormat is always 0xFFFE, so without looking at the GUID,
+// linear PCM and IEEE float would match as "both 0xFFFE" and come out as silence or
+// noise.
 func TestCombineWavDataRejectsMismatchedSubFormat(t *testing.T) {
-	// float は 32 ビット以上しか対応形式にならないので、両方 32 ビットで揃える。
+	// Only float of 32 bits and above is supported, so both use 32 bits.
 	first := defaultExtensibleSpec([]byte{1, 2, 3, 4, 5, 6, 7, 8})
 	first.bitsPerSample = 32
 	second := first
@@ -135,9 +137,9 @@ func TestCombineWavDataRejectsMismatchedSubFormat(t *testing.T) {
 	}
 }
 
-// TestCombineWavDataRejectsMismatchedChannelMask は、チャンネル数が同じでもスピーカー
-// 配置が違えば結合しないことを確認します。2ch のまま FL/FR と FC/LFE を繋ぐと、
-// 2 本目以降が別のスピーカーへ割り当てられます。
+// TestCombineWavDataRejectsMismatchedChannelMask checks that WAVs with the same channel
+// count but different speaker positions are not combined. Joining FL/FR with FC/LFE as
+// 2ch would assign the second and later files to different speakers.
 func TestCombineWavDataRejectsMismatchedChannelMask(t *testing.T) {
 	second := defaultExtensibleSpec([]byte{5, 6, 7, 8})
 	second.channelMask = 0xC // FC | LFE
@@ -150,8 +152,8 @@ func TestCombineWavDataRejectsMismatchedChannelMask(t *testing.T) {
 	if !ok {
 		t.Fatalf("error type = %T, want *ErrMismatchedWAVFormat", err)
 	}
-	if mismatch.Field != "チャンネルマスク" {
-		t.Errorf("Field = %q, want チャンネルマスク", mismatch.Field)
+	if mismatch.Field != "channel mask" {
+		t.Errorf("Field = %q, want channel mask", mismatch.Field)
 	}
 }
 
@@ -175,9 +177,9 @@ func TestCombineWavDataAcceptsIdenticalExtensibleFormat(t *testing.T) {
 	}
 }
 
-// TestParseFormatChunkRejectsTruncatedExtensible は、0xFFFE を名乗りながら拡張部を
-// 持たない fmt チャンクを弾くことを確認します。読み飛ばすと SubFormat が零値になり、
-// 本来別物のファイルが一致扱いになります。
+// TestParseFormatChunkRejectsTruncatedExtensible checks that a fmt chunk claiming 0xFFFE
+// without the extension is rejected. Skipping over it would leave SubFormat at its zero
+// value and make genuinely different files match.
 func TestParseFormatChunkRejectsTruncatedExtensible(t *testing.T) {
 	spec := defaultExtensibleSpec([]byte{1, 2})
 	spec.fmtChunkSize = minFormatChunkSize
@@ -188,9 +190,10 @@ func TestParseFormatChunkRejectsTruncatedExtensible(t *testing.T) {
 	}
 }
 
-// TestCombineWavDataRejectsMismatchedValidBits は、箱の大きさが同じでも有効ビット数が
-// 違えば結合しないことを確認します。バイトはずれませんが、結合後のヘッダーは先頭ファイルの
-// 値を名乗るので、2 本目以降の下位ビットを捨てて読むソフトがあります。
+// TestCombineWavDataRejectsMismatchedValidBits checks that WAVs with the same container
+// size but different valid bits are not combined. The bytes do not shift, but the combined
+// header claims the first file's value, so some software reads the second and later files
+// with their low bits discarded.
 func TestCombineWavDataRejectsMismatchedValidBits(t *testing.T) {
 	first := defaultExtensibleSpec([]byte{1, 2, 3, 4, 5, 6, 7, 8})
 	first.bitsPerSample = 32
@@ -203,8 +206,8 @@ func TestCombineWavDataRejectsMismatchedValidBits(t *testing.T) {
 	if !ok {
 		t.Fatalf("error type = %T, want *ErrMismatchedWAVFormat", err)
 	}
-	if mismatch.Field != "有効ビット数" || mismatch.First != 24 || mismatch.Got != 32 {
-		t.Errorf("Field/First/Got = %q/%d/%d, want 有効ビット数/24/32", mismatch.Field, mismatch.First, mismatch.Got)
+	if mismatch.Field != "valid bits per sample" || mismatch.First != 24 || mismatch.Got != 32 {
+		t.Errorf("Field/First/Got = %q/%d/%d, want valid bits per sample/24/32", mismatch.Field, mismatch.First, mismatch.Got)
 	}
 }
 
@@ -232,9 +235,9 @@ func TestInspectRejectsValidBitsLargerThanContainer(t *testing.T) {
 	}
 }
 
-// TestRejectsUnsupportedFormat は、デコードせずに繋げない形式を結合前に弾くことを確認します。
-// 圧縮形式は 1 サンプルのバイト数が量子化ビット数から決まらず、ブロック境界も無音も
-// 保証できません。
+// TestRejectsUnsupportedFormat checks that formats that cannot be joined without decoding
+// are rejected before combining. For compressed formats the bytes per sample do not
+// follow from the bit depth, so neither block boundaries nor silence can be guaranteed.
 func TestRejectsUnsupportedFormat(t *testing.T) {
 	plain := func(tag, bits uint16) []byte {
 		return buildWAV(wavSpec{audioFormat: tag, numChannels: 1, sampleRate: 24000, bitsPerSample: bits, audio: []byte{1, 2, 3, 4}})
@@ -321,12 +324,12 @@ func TestFormatSilenceByte(t *testing.T) {
 		format Format
 		want   byte
 	}{
-		// 8bit のリニア PCM だけが符号なし。中央の 0x80 が無音になる。
+		// Only 8-bit linear PCM is unsigned; the midpoint 0x80 is silence.
 		{"8bit PCM", Format{AudioFormat: pcmFormatTag, BitsPerSample: 8}, 0x80},
 		{"16bit PCM", Format{AudioFormat: pcmFormatTag, BitsPerSample: 16}, 0x00},
 		{"32bit float", Format{AudioFormat: 3, BitsPerSample: 32}, 0x00},
 		{"拡張形式の8bit PCM", Format{AudioFormat: extensibleFormatTag, BitsPerSample: 8, SubFormat: subFormatPCM}, 0x80},
-		// G.711 は符号化の規則そのものが違うので、0x00 を書くと無音ではなく雑音になる。
+		// G.711 has different encoding rules altogether, so writing 0x00 gives noise, not silence.
 		{"μ-law", Format{AudioFormat: muLawFormatTag, BitsPerSample: 8}, 0xFF},
 		{"A-law", Format{AudioFormat: aLawFormatTag, BitsPerSample: 8}, 0xD5},
 	}

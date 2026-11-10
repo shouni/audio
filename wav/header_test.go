@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// wavSpec は、テスト用 WAV の fmt チャンクに書き込む値です。
+// wavSpec holds the values written into the fmt chunk of a test WAV.
 type wavSpec struct {
 	audioFormat   uint16
 	numChannels   uint16
@@ -20,7 +20,7 @@ func defaultSpec(audio []byte) wavSpec {
 	return wavSpec{audioFormat: 1, numChannels: 1, sampleRate: 24000, bitsPerSample: 16, audio: audio}
 }
 
-// buildWAV は spec のとおりの 44 バイトヘッダーを持つ WAV を組み立てます。
+// buildWAV assembles a WAV with a 44-byte header as described by spec.
 func buildWAV(spec wavSpec) []byte {
 	blockAlign := spec.numChannels * spec.bitsPerSample / 8
 	header := make([]byte, standardHeaderSize)
@@ -40,12 +40,13 @@ func buildWAV(spec wavSpec) []byte {
 	return append(header, spec.audio...)
 }
 
-// TestCombineWavDataRejectsMismatchedFormat は、フォーマットの違う WAV を結合しないことを
-// 確認します。
+// TestCombineWavDataRejectsMismatchedFormat checks that WAVs of different formats are not
+// combined.
 //
-// 結合はデコードせず data チャンクを連結するだけで、出力ヘッダーは先頭ファイルのものを
-// 使います。そのため 48kHz ステレオを 24kHz モノラルのヘッダーで繋ぐと、音は出るものの
-// 速度・音程・チャンネル割り当てがすべて狂います。エラーにしないと呼び出し側は気付けません。
+// Combining only concatenates data chunks without decoding and uses the first file's
+// header for the output. Joining 48kHz stereo under a 24kHz mono header therefore still
+// plays, but with the speed, pitch and channel assignment all wrong. Without an error the
+// caller cannot notice.
 func TestCombineWavDataRejectsMismatchedFormat(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -55,24 +56,24 @@ func TestCombineWavDataRejectsMismatchedFormat(t *testing.T) {
 		{
 			name:      "サンプルレート違い",
 			mutate:    func(s *wavSpec) { s.sampleRate = 48000 },
-			wantField: "サンプルレート",
+			wantField: "sample rate",
 		},
 		{
 			name:      "チャンネル数違い",
 			mutate:    func(s *wavSpec) { s.numChannels = 2 },
-			wantField: "チャンネル数",
+			wantField: "channel count",
 		},
 		{
 			name:      "量子化ビット数違い",
 			mutate:    func(s *wavSpec) { s.bitsPerSample = 24 },
-			wantField: "量子化ビット数",
+			wantField: "bits per sample",
 		},
 		{
 			name: "フォーマット種別違い",
-			// float は 32/64 ビットだけが対応形式なので、ビット数も合わせて変える。
-			// AudioFormat を先に比べるため、食い違いはフォーマット種別として報告される。
+			// Only 32/64-bit float is supported, so change the bit depth along with it.
+			// AudioFormat is compared first, so the mismatch is reported as the format tag.
 			mutate:    func(s *wavSpec) { s.audioFormat = floatFormatTag; s.bitsPerSample = 32 },
-			wantField: "フォーマット種別",
+			wantField: "format tag",
 		},
 	}
 
@@ -124,8 +125,8 @@ func TestCombineWavDataAcceptsIdenticalFormat(t *testing.T) {
 	}
 }
 
-// TestCombineWavDataPreservesChunksBeforeData は、fmt と data の間にある任意チャンクを
-// ヘッダーとして引き継ぐことを確認します。LIST/INFO を持つファイルでも壊れないこと。
+// TestCombineWavDataPreservesChunksBeforeData checks that arbitrary chunks between fmt and
+// data are carried over as part of the header, so files with LIST/INFO do not break.
 func TestCombineWavDataPreservesChunksBeforeData(t *testing.T) {
 	withList := insertChunkBeforeData(buildWAV(defaultSpec([]byte{1, 2, 3, 4})), "LIST", []byte("abcdef"))
 
@@ -134,7 +135,7 @@ func TestCombineWavDataPreservesChunksBeforeData(t *testing.T) {
 		t.Fatalf("CombineWavData() error = %v", err)
 	}
 	if !bytes.Contains(combined, []byte("LIST")) {
-		t.Error("LIST チャンクがヘッダーから失われています")
+		t.Error("LIST chunk was lost from the header")
 	}
 	gotAudio := combined[len(combined)-6:]
 	if !bytes.Equal(gotAudio, []byte{1, 2, 3, 4, 5, 6}) {
@@ -142,8 +143,8 @@ func TestCombineWavDataPreservesChunksBeforeData(t *testing.T) {
 	}
 }
 
-// TestCombineWavDataHandlesOddSizedChunk は、奇数サイズのチャンクに続くパディング 1 バイトを
-// 読み飛ばして次のチャンクへ進めることを確認します。読み飛ばしを誤ると data を見失います。
+// TestCombineWavDataHandlesOddSizedChunk checks that the 1-byte padding after an odd-sized
+// chunk is skipped to reach the next chunk. Skipping it wrongly loses the data chunk.
 func TestCombineWavDataHandlesOddSizedChunk(t *testing.T) {
 	withOdd := insertChunkBeforeData(buildWAV(defaultSpec([]byte{1, 2, 3})), "LIST", []byte("abcde"))
 
@@ -208,8 +209,8 @@ func TestExtractAudioDataRejectsBrokenHeaders(t *testing.T) {
 	}
 }
 
-// insertChunkBeforeData は fmt チャンクの直後に任意のチャンクを差し込みます。
-// サイズが奇数のときは RIFF の規約どおりパディング 1 バイトを付けます。
+// insertChunkBeforeData inserts an arbitrary chunk right after the fmt chunk.
+// For an odd size it adds 1 byte of padding, as RIFF requires.
 func insertChunkBeforeData(wavBytes []byte, id string, payload []byte) []byte {
 	const dataChunkStart = 36
 

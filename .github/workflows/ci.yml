@@ -1,4 +1,4 @@
-# CI の実体は shouni/workflows。ジョブ構成とタグ運用の理由はそちらの README にある。
+# The CI itself lives in shouni/workflows; its README explains the job layout and tagging.
 name: CI
 
 on:
@@ -18,5 +18,5 @@ jobs:
   ci:
     uses: shouni/workflows/.github/workflows/go-ci.yml@v1
     with:
-      # wav は外から与えられたバイト列を解釈するため、探索を毎回回す。
+      # wav interprets bytes supplied from outside, so fuzzing runs on every CI run.
       fuzz-targets: "./wav#FuzzExtractAudioData ./wav#FuzzCombineToMatchesCombineWavData ./wav#FuzzCombineToDoesNotPanic"

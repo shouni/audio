@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// readSeekers は WAV バイト列を CombineTo へ渡せる形に包みます。
+// readSeekers wraps WAV byte slices in a form CombineTo accepts.
 func readSeekers(wavDataList ...[]byte) []io.ReadSeeker {
 	sources := make([]io.ReadSeeker, len(wavDataList))
 	for i, data := range wavDataList {
@@ -18,9 +18,9 @@ func readSeekers(wavDataList ...[]byte) []io.ReadSeeker {
 	return sources
 }
 
-// TestCombineToMatchesCombineWavData は、ストリーミング結合が一括結合と 1 バイトも
-// 違わない出力を作ることを確認します。2 つの経路が食い違うと、どちらを使うかで
-// 音が変わってしまいます。
+// TestCombineToMatchesCombineWavData checks that streaming combination produces output
+// identical, byte for byte, to in-memory combination. If the two paths diverged, the
+// audio would depend on which one was used.
 func TestCombineToMatchesCombineWavData(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -91,7 +91,7 @@ func TestCombineToMatchesCombineWavData(t *testing.T) {
 				t.Fatalf("CombineTo() error = %v", err)
 			}
 			if !bytes.Equal(got.Bytes(), want) {
-				t.Errorf("CombineTo() の出力が CombineWavData() と一致しません (%dバイト / %dバイト)", got.Len(), len(want))
+				t.Errorf("CombineTo() output does not match CombineWavData() (%d bytes / %d bytes)", got.Len(), len(want))
 			}
 		})
 	}
@@ -116,14 +116,14 @@ func TestCombineToRejectsMismatchedFormat(t *testing.T) {
 	if !ok {
 		t.Fatalf("error type = %T, want *ErrMismatchedWAVFormat", err)
 	}
-	if mismatch.Index != 1 || mismatch.Field != "サンプルレート" {
-		t.Errorf("Index/Field = %d/%q, want 1/サンプルレート", mismatch.Index, mismatch.Field)
+	if mismatch.Index != 1 || mismatch.Field != "sample rate" {
+		t.Errorf("Index/Field = %d/%q, want 1/sample rate", mismatch.Index, mismatch.Field)
 	}
 }
 
-// TestCombineToRejectsMismatchedFormatBeforeWriting は、フォーマット不一致を
-// 検出したときに w へ何も書かないことを確認します。途中まで書いてから失敗すると、
-// 呼び出し側の出力先に壊れた WAV の断片が残ります。
+// TestCombineToRejectsMismatchedFormatBeforeWriting checks that nothing is written to w
+// when a format mismatch is detected. Failing after a partial write would leave a broken
+// WAV fragment in the caller's destination.
 func TestCombineToRejectsMismatchedFormatBeforeWriting(t *testing.T) {
 	second := defaultSpec([]byte{5, 6, 7, 8})
 	second.numChannels = 2
@@ -136,7 +136,7 @@ func TestCombineToRejectsMismatchedFormatBeforeWriting(t *testing.T) {
 		t.Fatal("CombineTo() error = nil, want ErrMismatchedWAVFormat")
 	}
 	if out.Len() != 0 {
-		t.Errorf("失敗時に %d バイト書き出しています。何も書かないこと", out.Len())
+		t.Errorf("wrote %d bytes on failure; want nothing written", out.Len())
 	}
 }
 
@@ -161,9 +161,9 @@ func TestCombineToRejectsBrokenHeaders(t *testing.T) {
 	}
 }
 
-// TestCombineToRejectsOversizedCarriedHeader は、data の前に巨大なメタデータを持つ
-// ファイルを弾くことを確認します。読み込んでしまうと、入力サイズに依存しないという
-// ストリーミング結合の前提が崩れます。
+// TestCombineToRejectsOversizedCarriedHeader checks that a file with huge metadata before
+// data is rejected. Reading it would break the streaming path's premise of not depending
+// on input size.
 func TestCombineToRejectsOversizedCarriedHeader(t *testing.T) {
 	huge := insertChunkBeforeData(buildWAV(defaultSpec([]byte{1, 2})), "LIST", make([]byte, maxCarriedHeaderSize))
 
@@ -173,17 +173,17 @@ func TestCombineToRejectsOversizedCarriedHeader(t *testing.T) {
 		t.Fatalf("error type = %T, want *ErrInvalidWAVHeader", err)
 	}
 	if !strings.Contains(invalid.Details, "CombineWavData") {
-		t.Errorf("Details = %q, 代替手段の案内を含むこと", invalid.Details)
+		t.Errorf("Details = %q, want it to point to the alternative", invalid.Details)
 	}
 }
 
-// TestCombineToPropagatesWriteError は、出力先のエラーをそのまま返すことを確認します。
+// TestCombineToPropagatesWriteError checks that an error from the destination is returned as is.
 func TestCombineToPropagatesWriteError(t *testing.T) {
-	wantErr := errors.New("書き出し失敗")
+	wantErr := errors.New("write failed")
 
 	err := CombineTo(failingWriter{err: wantErr}, readSeekers(buildWAV(defaultSpec([]byte{1, 2}))))
 	if !errors.Is(err, wantErr) {
-		t.Fatalf("CombineTo() error = %v, want %v を含むこと", err, wantErr)
+		t.Fatalf("CombineTo() error = %v, want it to wrap %v", err, wantErr)
 	}
 }
 

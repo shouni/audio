@@ -5,24 +5,26 @@ import (
 	"io"
 )
 
-// maxCarriedHeaderSize は、先頭ファイルから引き継ぐヘッダー（data チャンク直前まで）の
-// 上限です。ストリーミング結合はメモリ使用量を入力サイズから切り離すのが目的なので、
-// 巨大なメタデータチャンクを丸ごと読み込んでその前提を壊さないよう歯止めを置きます。
+// maxCarriedHeaderSize caps the header carried over from the first file (everything
+// before the data chunk). Streaming combination exists to decouple memory use from input
+// size, so this stops a huge metadata chunk from being read whole and breaking that
+// premise.
 const maxCarriedHeaderSize = 1 << 20 // 1MiB
 
-// CombineTo は複数の WAV を結合し、結果を w へ書き出します。
+// CombineTo combines several WAVs and writes the result to w.
 //
-// 入力を丸ごとメモリへ載せる CombineWavData と違い、音声データを入力から w へ直接
-// 受け渡すため、必要なメモリは音声の長さに依存しません。本数に対しては、1 本ごとに
-// 走査結果と io.CopyN のコピー用バッファぶんが加わります（*os.File へ書くと約 33KB、
-// io.Discard なら数百バイト）。ファイル同士の結合や長尺の書き出しにはこちらを
-// 使ってください。
+// Unlike CombineWavData, which holds every input in memory, it passes the audio data
+// straight from the inputs to w, so the memory it needs does not depend on the audio's
+// length. Per input it adds only the scan result and io.CopyN's copy buffer (about 33 KB
+// when writing to an *os.File, a few hundred bytes for io.Discard). Use it for combining
+// files or writing long output.
 //
-// sources は 2 回走査します。1 回目でフォーマットと data チャンクの位置を調べ、
-// 2 回目で音声を転送します。出力の RIFF/data チャンクサイズは先頭に書く必要があり、
-// 全体の長さが分かるまで確定しないためです。したがって入力には io.ReadSeeker が要ります。
+// sources are scanned twice: the first pass finds the format and the position of the data
+// chunk, the second transfers the audio. The output's RIFF and data chunk sizes go at the
+// front and are not known until the whole length has been measured, which is why the
+// inputs must be io.ReadSeeker.
 //
-// 検証内容とエラーは CombineWavData と同じです。
+// Its validation and errors are the same as CombineWavData's.
 func CombineTo(w io.Writer, sources []io.ReadSeeker, opts ...CombineOption) error {
 	if len(sources) == 0 {
 		return &ErrNoAudioData{}
@@ -40,8 +42,8 @@ func CombineTo(w io.Writer, sources []io.ReadSeeker, opts ...CombineOption) erro
 		if err != nil {
 			return err
 		}
-		// 出力ヘッダーは先頭ファイルのものを使うため、フォーマットが違うと
-		// 2本目以降が別フォーマットとして再生されてしまう。
+		// The output header is the first file's, so a different format would make the
+		// second and later files play back as something they are not.
 		if i > 0 {
 			if err := verifySameFormat(parts[0].format, part.format, i); err != nil {
 				return err
@@ -66,31 +68,32 @@ func CombineTo(w io.Writer, sources []io.ReadSeeker, opts ...CombineOption) erro
 		return err
 	}
 	if _, err := w.Write(header); err != nil {
-		return fmt.Errorf("WAVヘッダーの書き出しに失敗しました: %w", err)
+		return fmt.Errorf("write WAV header: %w", err)
 	}
 
 	for i, source := range sources {
 		if i > 0 && len(silence) > 0 {
 			if _, err := w.Write(silence); err != nil {
-				return fmt.Errorf("無音の書き出しに失敗しました: %w", err)
+				return fmt.Errorf("write silence: %w", err)
 			}
 		}
 		if _, err := source.Seek(parts[i].dataOffset, io.SeekStart); err != nil {
 			return streamIOError(i, err)
 		}
 		if _, err := io.CopyN(w, source, parts[i].dataSize); err != nil {
-			return fmt.Errorf("WAVファイル #%d の音声データの転送に失敗しました: %w", i, err)
+			return fmt.Errorf("copy audio data of WAV file #%d: %w", i, err)
 		}
 	}
 	return nil
 }
 
-// readCarriedHeader は先頭ファイルから、そのまま出力へ引き継ぐヘッダーを読み込みます。
+// readCarriedHeader reads from the first file the header that is carried into the output
+// as is.
 func readCarriedHeader(source io.ReadSeeker, headerSize int64) ([]byte, error) {
 	if headerSize > maxCarriedHeaderSize {
 		return nil, &ErrInvalidWAVHeader{
 			Index:   0,
-			Details: fmt.Sprintf("dataチャンクより前のヘッダーが大きすぎます (%dバイト、上限%dバイト)。CombineWavData を使ってください", headerSize, maxCarriedHeaderSize),
+			Details: fmt.Sprintf("header before the data chunk is too large (%d bytes, limit %d bytes); use CombineWavData instead", headerSize, maxCarriedHeaderSize),
 		}
 	}
 	header := make([]byte, headerSize)

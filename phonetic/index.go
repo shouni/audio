@@ -6,14 +6,15 @@ import (
 	"unicode/utf8"
 )
 
-// prefixIndex は、入力のある位置から始まり形態素境界で終わる最長一致を引く索引です。
+// prefixIndex is an index that looks up the longest match starting at a given position in
+// the input and ending on a morpheme boundary.
 //
-// キーを先頭ルーンごとにまとめ、各グループを長い順で保持します。トークンごとの照合を
-// 全キーの走査ではなく、先頭文字が一致するキーだけに絞るためです。読み上書きと助数詞は
-// どちらもこの索引で引きます。
+// Keys are grouped by their first rune, each group kept longest first, so that matching a
+// token checks only the keys sharing its first character instead of every key. Both the
+// reading overrides and the counters are looked up through this index.
 type prefixIndex map[rune][]string
 
-// newPrefixIndex は keys から索引を組み立てます。keys の順序は結果に影響しません。
+// newPrefixIndex builds the index from keys. The order of keys does not affect the result.
 func newPrefixIndex(keys []string) prefixIndex {
 	sorted := slices.Clone(keys)
 	slices.SortFunc(sorted, func(a, b string) int {
@@ -31,10 +32,12 @@ func newPrefixIndex(keys []string) prefixIndex {
 	return index
 }
 
-// match は、input の start から始まり boundaries のいずれかで終わる最長のキーを返します。
+// match returns the longest key that starts at start in input and ends on one of
+// boundaries.
 //
-// 境界で終わる一致だけを採るのは、境界をまたぐ一致まで拾うと、キーが覆い切れなかった
-// 残りの文字が欠落するためです（例: 「世界観」に対する「世界」）。
+// Only matches ending on a boundary are taken, because a match that crosses a boundary
+// drops whatever characters the key failed to cover (for example 「世界」 against
+// 「世界観」).
 func (idx prefixIndex) match(input string, start int, boundaries map[int]struct{}) (string, bool) {
 	if start >= len(input) {
 		return "", false

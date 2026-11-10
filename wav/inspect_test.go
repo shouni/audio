@@ -8,7 +8,7 @@ import (
 
 func TestInspect(t *testing.T) {
 	t.Run("フォーマットとデータサイズを読み取れること", func(t *testing.T) {
-		// 24kHz モノラル 16bit = 48000 バイト/秒。4800 バイトはちょうど 100ms。
+		// 24kHz mono 16-bit = 48000 bytes/s, so 4800 bytes is exactly 100ms.
 		audio := make([]byte, 4800)
 
 		info, err := Inspect(buildWAV(defaultSpec(audio)))

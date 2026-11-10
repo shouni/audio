@@ -1,9 +1,10 @@
-// Package wav は、WAVデータをデコードなしでバイナリレベルで結合するユーティリティを提供します。
+// Package wav joins WAV data at the binary level, without decoding.
 //
-// 結合には 2 つの経路があります。CombineWavData はバイト列を受け取ってバイト列を返し、
-// CombineTo は io.ReadSeeker から io.Writer へ音声データを直接受け渡します。検証内容も
-// 出力も同一で、違うのはメモリの使い方だけです。Inspect は結合と同じ検証だけを行い、
-// フォーマットと再生時間を返します。
+// There are two ways to combine. CombineWavData takes byte slices and returns a byte
+// slice; CombineTo passes the audio data straight from io.ReadSeeker inputs to an
+// io.Writer. Their validation and output are identical; only their memory use differs.
+// Inspect runs the same validation as combining, without combining, and returns the
+// format and duration.
 package wav
 
 import (
@@ -11,28 +12,29 @@ import (
 	"time"
 )
 
-// CombineOption は結合の動作を調整する関数です。
+// CombineOption is a function that adjusts how combining behaves.
 type CombineOption func(*combineConfig)
 
-// combineConfig は結合の設定です。
+// combineConfig is the combining configuration.
 type combineConfig struct {
 	gap time.Duration
 }
 
-// WithGap は、結合する WAV と WAV の間に挟む無音の長さを指定する Option を返します。
+// WithGap returns an Option that sets the length of the silence inserted between one WAV
+// and the next.
 //
-// 文ごとに合成した音声をそのまま繋ぐと切れ目がなく詰まって聞こえるため、間を空けたい
-// 場合に使います。無音はサンプル境界（ブロックアライン）まで切り捨てた長さになるので、
-// チャンネルの並びがずれることはありません。
+// Audio synthesized sentence by sentence sounds crammed when joined back to back, with no
+// break between them; use this to leave a pause. The silence is truncated to a sample
+// boundary (the block align), so the channel order never shifts.
 //
-// gap が 0 以下のとき、および 1 サンプル分にも満たないときは無音を挿入しません。
+// No silence is inserted when gap is 0 or less, or shorter than one sample.
 func WithGap(gap time.Duration) CombineOption {
 	return func(c *combineConfig) {
 		c.gap = gap
 	}
 }
 
-// newCombineConfig は Option を順に適用した設定を返します。
+// newCombineConfig returns the configuration with the options applied in order.
 func newCombineConfig(opts []CombineOption) combineConfig {
 	var cfg combineConfig
 	for _, opt := range opts {
@@ -41,7 +43,8 @@ func newCombineConfig(opts []CombineOption) combineConfig {
 	return cfg
 }
 
-// silence は WAV と WAV の間に挟む無音のバイト列を返します。無音が不要なら nil を返します。
+// silence returns the bytes of silence inserted between one WAV and the next, or nil when
+// no silence is needed.
 func (c combineConfig) silence(format Format) []byte {
 	if c.gap <= 0 {
 		return nil
@@ -67,30 +70,31 @@ func (c combineConfig) silence(format Format) []byte {
 	return buf
 }
 
-// CombineWavData は複数の WAV データを結合し、単一の WAV データを生成します。
-// メモリ効率を最適化するため、結合前のオーディオデータをスライスで保持し、
-// 最終的なバッファ構築時に一度だけコピーを行います。
+// CombineWavData combines several WAVs into a single WAV.
+// To keep memory use down, it holds the audio data to combine as slices and copies them
+// only once, when building the final buffer.
 //
-// 出力ヘッダーには先頭ファイルの fmt チャンクをそのまま使うため、フォーマットの
-// 揃っていないファイルを渡すと *ErrMismatchedWAVFormat を返します。ADPCM などの
-// 圧縮形式は繋いでも正しい WAV になる保証がないため *ErrUnsupportedWAVFormat を返します。最後以外の入力の
-// data 長がブロック境界（全チャンネル分の 1 サンプル）の倍数でない場合も、そのまま繋ぐと
-// 後続のサンプルがずれるため *ErrInvalidWAVHeader を返します。
+// The output header reuses the first file's fmt chunk as is, so files whose formats do
+// not match return *ErrMismatchedWAVFormat. Compressed formats such as ADPCM are not
+// guaranteed to form a valid WAV when joined, so they return *ErrUnsupportedWAVFormat.
+// When the data length of any input but the last is not a multiple of the block size (one
+// sample across all channels), joining it as is would shift every following sample, so
+// that returns *ErrInvalidWAVHeader as well.
 //
-// 入力をすべてメモリに載せるので、長尺の結合には CombineTo の方が向きます。
+// Every input is held in memory, so CombineTo suits long combinations better.
 func CombineWavData(wavDataList [][]byte, opts ...CombineOption) ([]byte, error) {
 	if len(wavDataList) == 0 {
 		return nil, &ErrNoAudioData{}
 	}
 	cfg := newCombineConfig(opts)
 
-	// extractAudioData のエラーはファイル位置 (#N) を含むため、そのまま返す。
+	// extractAudioData's errors already carry the file position (#N), so return them as is.
 	first, err := extractAudioData(wavDataList[0], 0)
 	if err != nil {
 		return nil, err
 	}
 
-	// 無音はすべての隙間で同じ内容なので、1本だけ確保して使い回す。
+	// The silence is the same in every gap, so allocate one and reuse it.
 	silence := cfg.silence(first.format)
 
 	extractedAudio := make([][]byte, 0, len(wavDataList)*2-1)
@@ -103,8 +107,8 @@ func CombineWavData(wavDataList [][]byte, opts ...CombineOption) ([]byte, error)
 		if err != nil {
 			return nil, err
 		}
-		// 出力ヘッダーは先頭ファイルのものを使うため、フォーマットが違うと
-		// 2本目以降が別フォーマットとして再生されてしまう。
+		// The output header is the first file's, so a different format would make the
+		// second and later files play back as something they are not.
 		if err := verifySameFormat(first.format, current.format, i); err != nil {
 			return nil, err
 		}
@@ -123,13 +127,14 @@ func CombineWavData(wavDataList [][]byte, opts ...CombineOption) ([]byte, error)
 	return buildCombinedWav(first, extractedAudio, totalAudioSize)
 }
 
-// verifyBlockAligned は、後ろに別の入力が続く WAV の data 長がブロック境界（全チャンネル分の
-// 1 サンプル）の倍数であることを確認します。
+// verifyBlockAligned checks that the data length of a WAV followed by another input is a
+// multiple of the block size (one sample across all channels).
 //
-// 結合はデコードせず data を連結するだけなので、途中の入力が 1 サンプルの途中で切れていると、
-// 後続の全サンプルがその分だけずれて読まれ、無音ではなく轟音になります。最後の入力は
-// 後ろに何も続かないので対象外です（末尾の欠けたサンプルはデコーダが読み捨てます）。
-// blockAlign が 0 になるフォーマット（8 ビット未満）は判定できないので通します。
+// Combining concatenates data without decoding, so if an intermediate input ends partway
+// through a sample, every following sample is read shifted by that much, and the result
+// is a roar rather than silence. The last input is exempt because nothing follows it (a
+// decoder discards a truncated sample at the end). Formats whose blockAlign is 0 (under
+// 8 bits) cannot be checked and are let through.
 func verifyBlockAligned(format Format, dataSize int64, index int) error {
 	blockAlign := int64(format.blockAlign())
 	if blockAlign == 0 || dataSize%blockAlign == 0 {
@@ -137,28 +142,29 @@ func verifyBlockAligned(format Format, dataSize int64, index int) error {
 	}
 	return &ErrInvalidWAVHeader{
 		Index: index,
-		Details: fmt.Sprintf("dataチャンクの長さ (%dバイト) がブロック境界 (%dバイト) の倍数ではありません。後続のサンプルがずれるため結合できません",
+		Details: fmt.Sprintf("data chunk length (%d bytes) is not a multiple of the block size (%d bytes); following samples would shift, so it cannot be combined",
 			dataSize, blockAlign),
 	}
 }
 
-// verifySameFormat は、結合対象のフォーマットが先頭ファイルと一致することを確認します。
+// verifySameFormat checks that a format to combine matches the first file's.
 func verifySameFormat(first, current Format, index int) error {
 	switch {
 	case first.AudioFormat != current.AudioFormat:
-		return mismatchedFormat(index, "フォーマット種別", uint32(first.AudioFormat), uint32(current.AudioFormat))
+		return mismatchedFormat(index, "format tag", uint32(first.AudioFormat), uint32(current.AudioFormat))
 	case first.NumChannels != current.NumChannels:
-		return mismatchedFormat(index, "チャンネル数", uint32(first.NumChannels), uint32(current.NumChannels))
+		return mismatchedFormat(index, "channel count", uint32(first.NumChannels), uint32(current.NumChannels))
 	case first.SampleRate != current.SampleRate:
-		return mismatchedFormat(index, "サンプルレート", first.SampleRate, current.SampleRate)
+		return mismatchedFormat(index, "sample rate", first.SampleRate, current.SampleRate)
 	case first.BitsPerSample != current.BitsPerSample:
-		return mismatchedFormat(index, "量子化ビット数", uint32(first.BitsPerSample), uint32(current.BitsPerSample))
+		return mismatchedFormat(index, "bits per sample", uint32(first.BitsPerSample), uint32(current.BitsPerSample))
 	case first.ValidBitsPerSample != current.ValidBitsPerSample:
-		// 箱の大きさが同じならバイトはずれないが、結合後のヘッダーは先頭ファイルの値を
-		// 名乗るので、2 本目以降の下位ビットを捨てて読むソフトがある。
-		return mismatchedFormat(index, "有効ビット数", uint32(first.ValidBitsPerSample), uint32(current.ValidBitsPerSample))
+		// With the same container size the bytes do not shift, but the combined header
+		// claims the first file's value, so some software reads the second and later
+		// files with their low bits discarded.
+		return mismatchedFormat(index, "valid bits per sample", uint32(first.ValidBitsPerSample), uint32(current.ValidBitsPerSample))
 	case first.ChannelMask != current.ChannelMask:
-		return mismatchedFormat(index, "チャンネルマスク", first.ChannelMask, current.ChannelMask)
+		return mismatchedFormat(index, "channel mask", first.ChannelMask, current.ChannelMask)
 	case first.SubFormat != current.SubFormat:
 		return &ErrMismatchedSubFormat{Index: index, First: first.SubFormat, Got: current.SubFormat}
 	}

@@ -5,106 +5,107 @@ import (
 	"math"
 )
 
-// ErrNoAudioData は、結合対象の音声データがない場合に発生します。
+// ErrNoAudioData is returned when there is no audio data to combine.
 type ErrNoAudioData struct{}
 
 func (e *ErrNoAudioData) Error() string {
-	return "結合対象の音声データがありません"
+	return "no audio data to combine"
 }
 
-// ErrInvalidWAVHeader は、WAV ヘッダーの検証に失敗した場合に発生します。
+// ErrInvalidWAVHeader is returned when a WAV header fails validation.
 type ErrInvalidWAVHeader struct {
-	// Index はエラーが発生した WAV ファイルのインデックスです。
-	// Inspect のように一覧に属さない検証では -1 になります。
+	// Index is the position of the WAV file the error occurred in.
+	// It is -1 for a check that does not belong to a list, such as Inspect.
 	Index int
-	// Details はエラーの詳細情報です。
+	// Details describes the error.
 	Details string
 }
 
 func (e *ErrInvalidWAVHeader) Error() string {
 	if e.Index >= 0 {
-		return fmt.Sprintf("WAVファイル #%d のヘッダーが無効です: %s", e.Index, e.Details)
+		return fmt.Sprintf("invalid header in WAV file #%d: %s", e.Index, e.Details)
 	}
-	return fmt.Sprintf("WAVヘッダーが無効です: %s", e.Details)
+	return fmt.Sprintf("invalid WAV header: %s", e.Details)
 }
 
-// ErrMismatchedWAVFormat は、結合対象の WAV のフォーマットが先頭ファイルと揃っていない
-// 場合に発生します。
+// ErrMismatchedWAVFormat is returned when a WAV to combine does not match the format of
+// the first file.
 //
-// 結合はデコードせずにバイト列を連結するため、フォーマットが違うまま繋ぐと 2 本目以降が
-// 先頭ファイルのフォーマットとして再生され、速度も音程も狂った音になります。
+// Combining concatenates bytes without decoding, so joining a different format plays the
+// second and later files back as the first file's format, at the wrong speed and pitch.
 //
-// WAVE_FORMAT_EXTENSIBLE のサブフォーマット GUID だけが食い違う場合は、値を数値で
-// 表せないため ErrMismatchedSubFormat になります。
+// When only the WAVE_FORMAT_EXTENSIBLE sub-format GUID differs, the value cannot be
+// expressed as a number, so the error is ErrMismatchedSubFormat instead.
 type ErrMismatchedWAVFormat struct {
-	// Index はフォーマットが食い違った WAV ファイルのインデックスです。
+	// Index is the position of the WAV file whose format differs.
 	Index int
-	// Field は食い違ったフィールド名です（例: "サンプルレート"）。
+	// Field is the name of the field that differs (for example "sample rate").
 	Field string
-	// First は先頭ファイルの値、Got は Index のファイルの値です。
+	// First is the first file's value, Got is the value in the file at Index.
 	First uint32
 	Got   uint32
 }
 
 func (e *ErrMismatchedWAVFormat) Error() string {
-	return fmt.Sprintf("WAVファイル #%d の%sが先頭ファイルと一致しません (%d ≠ %d)。デコードなしの結合はフォーマットが揃っている必要があります",
+	return fmt.Sprintf("WAV file #%d differs from the first file in %s (%d ≠ %d); combining without decoding requires matching formats",
 		e.Index, e.Field, e.Got, e.First)
 }
 
-// ErrMismatchedSubFormat は、WAVE_FORMAT_EXTENSIBLE のサブフォーマット GUID が
-// 先頭ファイルと揃っていない場合に発生します。
+// ErrMismatchedSubFormat is returned when a WAVE_FORMAT_EXTENSIBLE sub-format GUID does
+// not match the first file.
 //
-// 拡張形式では fmt チャンクの AudioFormat が常に 0xFFFE になり、実際の符号化方式は
-// GUID 側にあります。GUID を見ないと、リニア PCM と IEEE float を「どちらも 0xFFFE」
-// として繋いでしまいます。
+// In the extensible format the fmt chunk's AudioFormat is always 0xFFFE and the actual
+// encoding lives in the GUID. Without looking at the GUID, linear PCM and IEEE float
+// would be joined as "both 0xFFFE".
 type ErrMismatchedSubFormat struct {
-	// Index はサブフォーマットが食い違った WAV ファイルのインデックスです。
+	// Index is the position of the WAV file whose sub-format differs.
 	Index int
-	// First は先頭ファイルの GUID、Got は Index のファイルの GUID です。
+	// First is the first file's GUID, Got is the GUID of the file at Index.
 	First [16]byte
 	Got   [16]byte
 }
 
 func (e *ErrMismatchedSubFormat) Error() string {
-	return fmt.Sprintf("WAVファイル #%d のサブフォーマットが先頭ファイルと一致しません (%s ≠ %s)。デコードなしの結合はフォーマットが揃っている必要があります",
+	return fmt.Sprintf("sub-format of WAV file #%d does not match the first file (%s ≠ %s); combining without decoding requires matching formats",
 		e.Index, formatGUID(e.Got), formatGUID(e.First))
 }
 
-// ErrUnsupportedWAVFormat は、デコードせずに繋げない形式の WAV が渡された場合に発生します。
+// ErrUnsupportedWAVFormat is returned when a WAV is in a format that cannot be joined
+// without decoding.
 //
-// 対応するのはリニア PCM（8 の倍数のビット数）、IEEE float（32/64 ビット）、
-// G.711 A-law / μ-law（8 ビット）と、それぞれの WAVE_FORMAT_EXTENSIBLE です。
-// ADPCM や MP3 を格納した WAV などの圧縮形式は、PCM に変換してから渡してください。
+// Supported are linear PCM (bit depths that are multiples of 8), IEEE float (32/64 bit),
+// G.711 A-law / μ-law (8 bit), and the WAVE_FORMAT_EXTENSIBLE form of each.
+// Convert compressed formats, such as ADPCM or a WAV carrying MP3, to PCM first.
 type ErrUnsupportedWAVFormat struct {
-	// Index は対応外の WAV ファイルのインデックスです。
-	// Inspect のように一覧に属さない検証では -1 になります。
+	// Index is the position of the unsupported WAV file.
+	// It is -1 for a check that does not belong to a list, such as Inspect.
 	Index int
-	// Format は読み取ったフォーマットです。
+	// Format is the format that was read.
 	Format Format
 }
 
 func (e *ErrUnsupportedWAVFormat) Error() string {
-	encoding := fmt.Sprintf("符号化方式 %#04x", e.Format.AudioFormat)
+	encoding := fmt.Sprintf("encoding %#04x", e.Format.AudioFormat)
 	if e.Format.AudioFormat == extensibleFormatTag {
-		encoding = "サブフォーマット " + formatGUID(e.Format.SubFormat)
+		encoding = "sub-format " + formatGUID(e.Format.SubFormat)
 	}
-	target := "WAVファイル"
+	target := "WAV file"
 	if e.Index >= 0 {
-		target = fmt.Sprintf("WAVファイル #%d", e.Index)
+		target = fmt.Sprintf("WAV file #%d", e.Index)
 	}
-	return fmt.Sprintf("%s は対応していない形式です (%s、%dビット)。デコードなしの結合はリニアPCM・IEEE float・A-law・μ-lawだけが対象です。PCMに変換してから渡してください",
+	return fmt.Sprintf("%s is in an unsupported format (%s, %d bits); combining without decoding supports only linear PCM, IEEE float, A-law and μ-law, so convert it to PCM first",
 		target, encoding, e.Format.BitsPerSample)
 }
 
-// ErrWAVTooLarge は、結合結果が RIFF の表現できる上限 (4GB) を超える場合に発生します。
+// ErrWAVTooLarge is returned when the combined result exceeds what RIFF can express (4GB).
 //
-// RIFF チャンクサイズと data チャンクサイズはどちらも 32bit なので、これを超えたファイルは
-// サイズを正しく書けません。分割して結合してください。
+// The RIFF chunk size and the data chunk size are both 32-bit, so a larger file cannot
+// record its sizes correctly. Split it and combine the parts separately.
 type ErrWAVTooLarge struct {
-	// Size は書き出そうとした RIFF チャンクサイズ（ファイル全体 - 8 バイト）です。
+	// Size is the RIFF chunk size that would have been written (whole file minus 8 bytes).
 	Size uint64
 }
 
 func (e *ErrWAVTooLarge) Error() string {
-	return fmt.Sprintf("結合後のWAVファイルサイズが4GBを超過しています (%dバイト、上限%dバイト)", e.Size, uint64(math.MaxUint32))
+	return fmt.Sprintf("combined WAV file exceeds 4GB (%d bytes, limit %d bytes)", e.Size, uint64(math.MaxUint32))
 }
