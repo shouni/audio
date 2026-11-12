@@ -52,7 +52,8 @@ var particleReadings = map[string]string{
 }
 
 // WithPhraseSpacing returns an Option that inserts a space at phrase boundaries (right
-// after a particle or auxiliary verb).
+// after a particle or auxiliary verb). A run of particles and auxiliary verbs is one
+// boundary, so the space goes after the last of them (see phraseSpacer).
 func WithPhraseSpacing() Option {
 	return func(c *Converter) {
 		c.phraseSpacing = true
@@ -213,8 +214,12 @@ func (c *Converter) convertLine(input string) string {
 	var sb strings.Builder
 	sb.Grow(len(input) * 2)
 
+	// The phrase break a token owes is written only once the next token turns out to start a
+	// new phrase (see phraseSpacer).
+	var spacer phraseSpacer
 	for i := 0; i < len(tokens); {
 		token := tokens[i]
+		spacer.before(&sb, c.phraseSpacing, token.POS())
 
 		surface, ok := c.overrideIndex.match(input, token.Position, boundaries)
 		if !ok {
@@ -223,13 +228,13 @@ func (c *Converter) convertLine(input string) string {
 			// only the default interpretation.
 			if numberReading, next, matched := c.matchNumberAt(input, tokens, i, boundaries); matched {
 				sb.WriteString(numberReading)
-				c.writePhraseBreak(&sb, tokens[next-1].POS())
+				spacer.after(tokens[next-1].POS())
 				i = next
 				continue
 			}
 			pos := token.POS()
 			sb.WriteString(tokenReading(token, pos))
-			c.writePhraseBreak(&sb, pos)
+			spacer.after(pos)
 			i++
 			continue
 		}
@@ -242,7 +247,7 @@ func (c *Converter) convertLine(input string) string {
 			last = i
 			i++
 		}
-		c.writePhraseBreak(&sb, tokens[last].POS())
+		spacer.after(tokens[last].POS())
 	}
 
 	result := sb.String()
@@ -252,11 +257,30 @@ func (c *Converter) convertLine(input string) string {
 	return result
 }
 
-// writePhraseBreak writes a space right after a token at a phrase boundary.
-func (c *Converter) writePhraseBreak(sb *strings.Builder, pos []string) {
-	if c.phraseSpacing && isPhraseBreak(pos) {
+// phraseSpacer places the phrase spaces of one line.
+//
+// A space goes after the last particle or auxiliary verb of a run, not after each of them.
+// Stacked particles belong to one phrase: writing a space after every one of them split
+// 「誰にも」 into ダレニ モ, 「街へと」 into マチエ ト and 「吹いても」 into フイテ モ, and a
+// singer or a speech engine reads the space as a pause inside the phrase. So the break a
+// token owes is held until the next token, and dropped when that token is itself a particle
+// or an auxiliary verb (it continues the phrase). A break still owed at the end of the line
+// is never written, which also keeps line ends free of trailing spaces.
+type phraseSpacer struct {
+	pending bool
+}
+
+// before writes the held break if the token about to be written (pos) starts a new phrase.
+func (s *phraseSpacer) before(sb *strings.Builder, enabled bool, pos []string) {
+	if s.pending && enabled && !isPhraseBreak(pos) {
 		sb.WriteByte(' ')
 	}
+	s.pending = false
+}
+
+// after records whether the token just written (pos) ends a phrase.
+func (s *phraseSpacer) after(pos []string) {
+	s.pending = isPhraseBreak(pos)
 }
 
 // tokenBoundaries returns the set of boundaries: the start byte offset of every token, plus

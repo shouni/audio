@@ -136,6 +136,28 @@ func TestConverter_ConvertToReading_WithPhraseSpacing(t *testing.T) {
 			input: "絆を奏でる",
 			want:  "キズナオ カナデル",
 		},
+		// A run of particles and auxiliary verbs is one phrase: the space goes after the last
+		// of them. A space after each one put a pause inside the phrase (ダレニ モ).
+		{
+			name:  "stacked particles ni mo stay together",
+			input: "誰にも見せない",
+			want:  "ダレニモ ミセナイ",
+		},
+		{
+			name:  "stacked particles he to stay together",
+			input: "夜の街へと走り出す",
+			want:  "ヨルノ マチエト ハシリダス",
+		},
+		{
+			name:  "stacked particles kara ha stay together",
+			input: "ここからは歩く",
+			want:  "ココカラワ アルク",
+		},
+		{
+			name:  "conjunctive particle te mo stays together",
+			input: "風が吹いても",
+			want:  "カゼガ フイテモ",
+		},
 		{
 			name:  "trailing particle space is trimmed",
 			input: "夜の",
