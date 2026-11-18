@@ -277,6 +277,13 @@ func TestDefaultReadingOverrides_KeepsPlainCompoundsUnoverridden(t *testing.T) {
 		// 永遠→トワ).
 		{input: "音響", want: "オンキョウ"},
 		{input: "音響効果", want: "オンキョウコウカ"},
+		// 土 is keyed only with a following particle, so words and dates that read ド stay
+		// as the dictionary has them.
+		{input: "土曜", want: "ドヨウ"},
+		{input: "土日", want: "ドニチ"},
+		{input: "粘土", want: "ネンド"},
+		{input: "土足", want: "ドソク"},
+		{input: "（土）", want: "（ド）"},
 	}
 
 	for _, tt := range tests {
@@ -347,6 +354,31 @@ func TestDefaultReadingOverrides_FixesMisreadings(t *testing.T) {
 		{input: "仄暗く沈む", want: "ホノグラクシズム"},
 		// The dictionary has no reading for 檸檬, so it stays in kanji
 		{input: "檸檬の香り", want: "レモンノカオリ"},
+		// The dictionary knows 無くす but not the 失くす spelling, so it splits 失|くし and
+		// reads 失 as シツ (シツクシタ). Each inflected form splits differently (失|くす,
+		// 失|くさ, 失|くし, 失|くせ, 失|く), so every stem the analyser emits is keyed. Found in
+		// an ap-music draft (music-20261117-152150-68e31a9bfb56, 2026-11-17).
+		{input: "失くした痛みを", want: "ナクシタイタミオ"},
+		{input: "失くして", want: "ナクシテ"},
+		{input: "失くす前に", want: "ナクスマエニ"},
+		{input: "失くさない", want: "ナクサナイ"},
+		{input: "失くせない", want: "ナクセナイ"},
+		{input: "失くそう", want: "ナクソウ"},
+		// The potential form 誓える is missing, so it splits 誓|える and reads 誓 as the noun
+		// チカイ (チカイエル). 誓えた / 誓えない split 誓|え|… instead, and a 誓え key alone is
+		// redundant (the dictionary has 誓え as one token elsewhere), so those two are keyed whole.
+		// Found in an ap-music draft (music-20261117-151204-38f8a3a10195, 2026-11-17).
+		{input: "強く誓えるはず", want: "ツヨクチカエルハズ"},
+		{input: "誓えた日", want: "チカエタヒ"},
+		{input: "誓えない", want: "チカエナイ"},
+		// 「土」 alone is read ド (as in 土曜). Only 土 followed by a particle or まみれ is keyed,
+		// so the weekday abbreviation (土) keeps ド. Found in an ap-music draft
+		// (music-20261117-151638-de6e4134cee0, 2026-11-17).
+		{input: "眠る土の上で", want: "ネムルツチノウエデ"},
+		{input: "土に還る", want: "ツチニカエル"},
+		{input: "土を踏む", want: "ツチオフム"},
+		{input: "土から芽吹く", want: "ツチカラメブク"},
+		{input: "土まみれの手", want: "ツチマミレノテ"},
 	}
 
 	for _, tt := range tests {
