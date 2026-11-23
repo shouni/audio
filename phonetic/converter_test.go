@@ -138,6 +138,28 @@ func TestConverter_ConvertToReading_WithPhraseSpacing(t *testing.T) {
 		},
 		// A hiragana word right after a verb's past ending is split by the analyser, and the
 		// space lands inside the word (ミツケタト モシビ). The overrides keep the word whole.
+		// The helper verb after て is split off as a dependent verb (越え|て|く). A break
+		// before it put a pause inside the verb (コエテ ク); found in a Suno lyric (2026-11-23).
+		{
+			name:  "no space before the contracted helper verb ku",
+			input: "冷たい夜を越えてく",
+			want:  "ツメタイヨルオ コエテク",
+		},
+		{
+			name:  "no space before the helper verb iku",
+			input: "走っていく",
+			want:  "ハシッテイク",
+		},
+		{
+			name:  "no space before the helper verb in the past tense",
+			input: "歩いてきた道",
+			want:  "アルイテキタ ミチ",
+		},
+		{
+			name:  "no space inside the contracted -te itta",
+			input: "置いてった",
+			want:  "オイテッタ",
+		},
 		{
 			name:  "no space inside a hiragana word after a verb",
 			input: "見つけたともしび",

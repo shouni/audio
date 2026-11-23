@@ -271,8 +271,12 @@ type phraseSpacer struct {
 }
 
 // before writes the held break if the token about to be written (pos) starts a new phrase.
+//
+// A dependent verb (動詞・非自立) continues the phrase too. After the connective て, the
+// analyser splits off the helper verb that follows (越え|て|く, 走っ|て|いく, 歩い|て|き|た),
+// and a break before it put a pause inside the verb (コエテ ク, ハシッテ イク).
 func (s *phraseSpacer) before(sb *strings.Builder, enabled bool, pos []string) {
-	if s.pending && enabled && !isPhraseBreak(pos) {
+	if s.pending && enabled && !isPhraseBreak(pos) && !isDependentVerb(pos) {
 		sb.WriteByte(' ')
 	}
 	s.pending = false
@@ -383,6 +387,12 @@ func isConvertibleHiragana(r rune) bool {
 // ends a phrase.
 func isPhraseBreak(pos []string) bool {
 	return len(pos) > 0 && (pos[0] == "助詞" || pos[0] == "助動詞")
+}
+
+// isDependentVerb reports whether the token is a dependent verb (動詞・非自立), such as the
+// helper verb after て (いく, く, おく, きた) or the contracted てる / ちゃう.
+func isDependentVerb(pos []string) bool {
+	return len(pos) > 1 && pos[0] == "動詞" && pos[1] == "非自立"
 }
 
 // particleReading returns the pronunciation of 「は」「へ」「を」 used as a particle.

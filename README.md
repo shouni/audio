@@ -112,7 +112,7 @@ The counter table (`counters` in `phonetic/number.go`) holds **only counters who
 
 #### Phrase Spacing
 
-Inserting a space at phrase boundaries (right after a particle or auxiliary verb) helps a TTS engine read with natural intonation. Stacked particles stay in one phrase, so the space goes after the last of them (「誰にも見せない」 → ダレニモ ミセナイ, not ダレニ モ).
+Inserting a space at phrase boundaries (right after a particle or auxiliary verb) helps a TTS engine read with natural intonation. Stacked particles stay in one phrase, so the space goes after the last of them (「誰にも見せない」 → ダレニモ ミセナイ, not ダレニ モ). The helper verb after て (いく, く, おく, きた) also continues the phrase (「越えてく」 → コエテク, not コエテ ク).
 
 ```go
 converter, _ := phonetic.NewConverter(
