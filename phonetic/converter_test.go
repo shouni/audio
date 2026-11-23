@@ -136,6 +136,18 @@ func TestConverter_ConvertToReading_WithPhraseSpacing(t *testing.T) {
 			input: "絆を奏でる",
 			want:  "キズナオ カナデル",
 		},
+		// A hiragana word right after a verb's past ending is split by the analyser, and the
+		// space lands inside the word (ミツケタト モシビ). The overrides keep the word whole.
+		{
+			name:  "no space inside a hiragana word after a verb",
+			input: "見つけたともしび",
+			want:  "ミツケタトモシビ",
+		},
+		{
+			name:  "no space inside hiragana tsuchi after a verb",
+			input: "眠るつちに",
+			want:  "ネムルツチニ",
+		},
 		// A run of particles and auxiliary verbs is one phrase: the space goes after the last
 		// of them. A space after each one put a pause inside the phrase (ダレニ モ).
 		{
@@ -379,6 +391,13 @@ func TestDefaultReadingOverrides_FixesMisreadings(t *testing.T) {
 		{input: "土を踏む", want: "ツチオフム"},
 		{input: "土から芽吹く", want: "ツチカラメブク"},
 		{input: "土まみれの手", want: "ツチマミレノテ"},
+		// 灯籠 is read as two words, 灯 (アカリ) and 籠 (カゴ). Found in a Suno lyric (Harbor of
+		// Lanterns, 2026-11-22).
+		{input: "揺れる灯籠", want: "ユレルトウロウ"},
+		{input: "灯籠流し", want: "トウロウナガシ"},
+		// Written in hiragana, つち splits off its first kana after a verb, and the 上 that follows
+		// is read as the suffix ジョウ (ネムルツ チノジョウデ). Found in a Suno lyric (2026-11-22).
+		{input: "眠るつちの上で", want: "ネムルツチノウエデ"},
 	}
 
 	for _, tt := range tests {
@@ -516,8 +535,18 @@ func TestDefaultReadingOverrides_NoRedundantEntries(t *testing.T) {
 	}
 	plain := &Converter{t: tok, readingOverrides: map[string]string{}, numberReading: true}
 	plain.rebuildOverrideKeys()
+	plainSpaced := &Converter{t: tok, readingOverrides: map[string]string{}, numberReading: true, phraseSpacing: true}
+	plainSpaced.rebuildOverrideKeys()
 
 	overridden, err := NewConverter(WithNumberReading())
+	if err != nil {
+		t.Fatalf("failed to create converter: %v", err)
+	}
+	// An override can also be what keeps a phrase space out of the middle of a word: a
+	// hiragana word split by the analyser (見つけたともしび → 見つけ|た|と|もし|び) reads the
+	// same but gets a space after と (ミツケタト モシビ), which a singer takes as a pause. So
+	// the comparison is made with phrase spacing too.
+	overriddenSpaced, err := NewConverter(WithNumberReading(), WithPhraseSpacing())
 	if err != nil {
 		t.Fatalf("failed to create converter: %v", err)
 	}
@@ -529,17 +558,20 @@ func TestDefaultReadingOverrides_NoRedundantEntries(t *testing.T) {
 	// needs checking here.
 	// "今%s" is the context of a preceding noun. The misreading of an imperative as a
 	// suffix (今絶て → コンゼッテ) appears only in this form.
+	// "見つけた%s" and "眠る%s" are the contexts after a verb: right after one, a hiragana word
+	// can lose its first kana to the verb's ending (見つけたともしび → ミツケタト モシビ).
 	contexts := []string{
 		"%s", "%sが好き", "%sを抱いて", "%sの向こう", "君の%s",
 		"遠い%sへ", "%sだけが残る", "静かな%sと", "%sは終わらない",
-		"[Chorus] %s", "今%s",
+		"[Chorus] %s", "今%s", "見つけた%s", "眠る%s",
 	}
 
 	for surface := range defaultReadingOverrides {
 		t.Run(surface, func(t *testing.T) {
 			for _, format := range contexts {
 				input := strings.ReplaceAll(format, "%s", surface)
-				if plain.ConvertToReading(input) != overridden.ConvertToReading(input) {
+				if plain.ConvertToReading(input) != overridden.ConvertToReading(input) ||
+					plainSpaced.ConvertToReading(input) != overriddenSpaced.ConvertToReading(input) {
 					return // If any one differs from the dictionary, this override is doing its job.
 				}
 			}
